@@ -80,20 +80,7 @@ maharajah -D /path/to/project query "How does authentication work?"
 
 ### Default excludes
 
-maharajah automatically skips directories that contain build artifacts, not source code. The built-in list covers all supported languages:
-
-| Pattern | Toolchain |
-|---|---|
-| `**/target/**` | Cargo (Rust), Maven, sbt (Scala) |
-| `**/node_modules/**` | npm / yarn / pnpm |
-| `**/__pycache__/**`, `.venv/**`, `venv/**`, `env/**` | Python |
-| `vendor/**` | Go modules |
-| `dist-newstyle/**`, `.stack-work/**` | Cabal, Stack (Haskell) |
-| `.bundle/**` | Bundler (Ruby) |
-| `.gradle/**`, `**/build/**`, `.sbt/**` | Gradle, sbt (Java / Scala) |
-| `**/bin/Debug/**`, `**/bin/Release/**`, `**/obj/**` | MSBuild (C# / F#) |
-
-These patterns are applied to directories, so descent is pruned early — large trees like `target/` are never walked at all.
+maharajah automatically skips directories that contain build artifacts, not source code. The built-in list covers all supported languages — large trees like `target/` or `node_modules/` are never walked at all.
 
 To add project-specific excludes on top of the defaults, use `-x` on the command line or `default_excludes` in `maharajah.toml`. To override the list entirely, replace `default_excludes` in your global `~/.maharajah/maharajah.toml`.
 
