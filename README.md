@@ -10,7 +10,7 @@ Named after [Maharajah and the Sepoys](https://en.wikipedia.org/wiki/Maharajah_a
 
 - Runs entirely locally via [Ollama](https://ollama.com) — no external API keys required
 - Incremental indexing: SHA-256 hash checks mean only changed files are re-embedded
-- Tree-sitter AST-aware chunking for 11 languages
+- Tree-sitter AST-aware chunking for Rust, Python, JavaScript/JSX, TypeScript/TSX, Go, Java, C#, F#, Scala, Haskell, and Ruby
 - Auto-refresh on `find`/`query` — index stays current without a manual `index` step
 - Vector store powered by [LanceDB](https://lancedb.com) (embedded, no server required)
 - Build-artifact directories excluded by default (`target/`, `node_modules/`, `build/`, etc.) — configurable per project
@@ -145,24 +145,3 @@ default_excludes = [
 ]
 ```
 
-## Supported languages
-
-| Extension | Parser |
-|---|---|
-| `rs` | tree-sitter-rust |
-| `py` | tree-sitter-python |
-| `js`, `jsx` | tree-sitter-javascript |
-| `ts`, `tsx` | tree-sitter-typescript |
-| `go` | tree-sitter-go |
-| `java` | tree-sitter-java |
-| `cs` | tree-sitter-c-sharp |
-| `fs`, `fsx` | tree-sitter-fsharp |
-| `scala` | tree-sitter-scala |
-| `hs` | tree-sitter-haskell |
-| `rb` | tree-sitter-ruby |
-
-## How it works
-
-**Indexing:** maharajah walks the project directory, reads each file, and computes a SHA-256 hash. Files whose hash matches a stored value are skipped. Changed or new files are parsed with tree-sitter into AST-aware chunks (functions, classes, methods); files with no matching parser are skipped. Each chunk is sent to Ollama's embedding endpoint and the resulting vector is stored in a LanceDB table alongside metadata (file path, hash, language, symbol name, line range).
-
-**Querying:** The question is embedded with the same model, and the top-*k* nearest chunks are retrieved from LanceDB via vector search. The chunks are assembled into a prompt and streamed through Ollama's generation model, which produces a grounded answer. `find` stops after the retrieval step and returns the ranked chunks directly without LLM generation.
