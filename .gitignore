@@ -1,0 +1,12 @@
+# Rust build output
+/target/
+
+# Editor / IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# maharajah index data
+.maharajah/
