@@ -150,7 +150,7 @@ pub fn parse_file(path: &Path, content: &str, max_chunk_lines: usize) -> Vec<Chu
             CSHARP_KINDS,
             max_chunk_lines,
         ),
-        "scala" => parse_with_grammar(
+        "scala" | "sc" => parse_with_grammar(
             content,
             tree_sitter_scala::LANGUAGE.into(),
             "scala",
@@ -164,7 +164,7 @@ pub fn parse_file(path: &Path, content: &str, max_chunk_lines: usize) -> Vec<Chu
             HASKELL_KINDS,
             max_chunk_lines,
         ),
-        "js" | "jsx" => parse_with_grammar(
+        "js" | "cjs" | "mjs" | "jsx" => parse_with_grammar(
             content,
             tree_sitter_javascript::LANGUAGE.into(),
             "javascript",

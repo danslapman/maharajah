@@ -63,6 +63,8 @@ impl Default for AppConfig {
                     "rs".into(),
                     "py".into(),
                     "js".into(),
+                    "cjs".into(),
+                    "mjs".into(),
                     "jsx".into(),
                     "ts".into(),
                     "tsx".into(),
@@ -72,6 +74,7 @@ impl Default for AppConfig {
                     "fs".into(),
                     "fsx".into(),
                     "scala".into(),
+                    "sc".into(),
                     "hs".into(),
                     "rb".into(),
                 ],
@@ -149,7 +152,7 @@ embedding_dim = 768
 
 [index]
 max_chunk_lines = 40
-default_extensions = ["rs", "py", "js", "jsx", "ts", "tsx", "go", "java", "cs", "fs", "fsx", "scala", "hs", "rb"]
+default_extensions = ["rs", "py", "js", "cjs", "mjs", "jsx", "ts", "tsx", "go", "java", "cs", "fs", "fsx", "scala", "sc", "hs", "rb"]
 default_excludes = [
     "**/target/**",
     "**/node_modules/**",
