@@ -42,17 +42,17 @@ cargo install --path .
 cd /path/to/project
 
 # Index the project (-D is optional when you're already inside it)
-maharajah index
+mh index
 
 # Semantic search — returns ranked code chunks with summaries
-maharajah find "database connection pooling"
+mh find "database connection pooling"
 
 # Semantic search with fusion of content and summary results
-maharajah query "database connection pooling"
+mh query "database connection pooling"
 
 # ── Or pass the directory explicitly (useful in scripts / CI) ─────────────────
-maharajah -D /path/to/project index
-maharajah -D /path/to/project find "database connection pooling"
+mh -D /path/to/project index
+mh -D /path/to/project find "database connection pooling"
 ```
 
 On first run `index` will print progress as it downloads and loads the model:
@@ -132,13 +132,13 @@ Fields: `rank` (1-based position), `file_path` (relative to the indexed director
 
 ### Default excludes
 
-maharajah automatically skips directories that contain build artifacts, not source code. The built-in list covers all supported languages — large trees like `target/` or `node_modules/` are never walked at all.
+mh automatically skips directories that contain build artifacts, not source code. The built-in list covers all supported languages — large trees like `target/` or `node_modules/` are never walked at all.
 
 To add project-specific excludes on top of the defaults, use `-x` on the command line or `default_excludes` in `maharajah.toml`. To override the list entirely, replace `default_excludes` in your global `~/.maharajah/maharajah.toml`.
 
 ---
 
-maharajah uses a three-layer configuration model:
+mh uses a three-layer configuration model:
 
 1. **Global defaults** (built in) — sensible values that work out of the box
 2. **Global config** (`~/.maharajah/maharajah.toml`) — auto-created on first run; edit to change defaults for all projects
@@ -189,7 +189,7 @@ default_excludes = [
 If you have an existing index that needs to be rebuilt, run:
 
 ```sh
-maharajah index --reindex
+mh index --reindex
 ```
 
 This wipes the index and rebuilds all embeddings from scratch. Required any time you change the embedding model, since vectors from different models are not comparable.

@@ -3,6 +3,10 @@ name = "maharajah"
 version = "0.1.0"
 edition = "2024"
 
+[[bin]]
+name = "mh"
+path = "src/main.rs"
+
 [dependencies]
 # Async runtime
 tokio = { version = "1.49", features = ["rt-multi-thread", "macros", "fs", "io-util"] }
