@@ -6,7 +6,7 @@ use std::path::PathBuf;
 #[command(
     name = "maharajah",
     version,
-    about = "Semantically search your codebase using UniXcoder embeddings",
+    about = "Semantically search your codebase using local embeddings",
     long_about = None
 )]
 pub struct Cli {
@@ -55,9 +55,9 @@ pub struct IndexArgs {
     #[arg(short = 'x', long, value_name = "GLOB")]
     pub exclude: Vec<String>,
 
-    /// Maximum chunk size in source lines
-    #[arg(long, default_value_t = 40)]
-    pub chunk_lines: usize,
+    /// Maximum chunk size in source lines (overrides config when set)
+    #[arg(long)]
+    pub chunk_lines: Option<usize>,
 
     /// Wipe and rebuild the index from scratch (required after schema migration)
     #[arg(long)]

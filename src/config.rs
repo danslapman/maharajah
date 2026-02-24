@@ -9,18 +9,16 @@ use crate::error::Result;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {
-    pub unixcoder: UniXcoderConfig,
+    pub embed: EmbedConfig,
     pub db: DbConfig,
     pub index: IndexConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct UniXcoderConfig {
-    /// Variant of the UniXcoder model to use:
-    /// - "nine" → microsoft/unixcoder-base-nine (fine-tuned for code↔NL retrieval, recommended)
-    /// - "base" → microsoft/unixcoder-base (general-purpose)
-    /// Both are ~125 MB and downloaded from HuggingFace Hub on first run.
-    pub variant: String,
+pub struct EmbedConfig {
+    /// HuggingFace model ID to use for embeddings.
+    /// Defaults to "nomic-ai/CodeRankEmbed" (~550 MB, downloaded on first run).
+    pub model_id: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -44,15 +42,15 @@ pub struct IndexConfig {
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
-            unixcoder: UniXcoderConfig {
-                variant: "nine".into(),
+            embed: EmbedConfig {
+                model_id: "nomic-ai/CodeRankEmbed".into(),
             },
             db: DbConfig {
                 table_name: "chunks".into(),
                 embedding_dim: 768,
             },
             index: IndexConfig {
-                max_chunk_lines: 40,
+                max_chunk_lines: 150,
                 default_extensions: vec![
                     "rs".into(),
                     "py".into(),
@@ -134,17 +132,15 @@ const DEFAULT_GLOBAL_CONFIG: &str = r#"# maharajah global configuration
 # This file was created automatically. Edit as needed.
 # Project-level overrides go in maharajah.toml in the project directory.
 
-[unixcoder]
-variant = "nine"   # "nine" = microsoft/unixcoder-base-nine (fine-tuned for code↔NL retrieval)
-                   # "base" = microsoft/unixcoder-base (general, slightly smaller)
-                   # Both ~125MB, downloaded from HuggingFace Hub on first run
+[embed]
+model_id = "nomic-ai/CodeRankEmbed"   # ~550 MB, downloaded from HuggingFace Hub on first run
 
 [db]
 table_name = "chunks"
 embedding_dim = 768
 
 [index]
-max_chunk_lines = 40
+max_chunk_lines = 150
 default_extensions = ["rs", "py", "js", "cjs", "mjs", "jsx", "ts", "tsx", "go", "java", "cs", "fs", "fsx", "scala", "sc", "hs", "rb"]
 default_excludes = [
     "**/target/**",
@@ -171,7 +167,7 @@ default_excludes = [
 /// 2. Global config file (~/.maharajah/maharajah.toml) — silently ignored if missing
 /// 3. Project config file (<target-dir>/maharajah.toml) — only merged if Some
 /// 4. Environment variables prefixed with MAHARAJAH_ (nested with __)
-///    e.g. MAHARAJAH_UNIXCODER__VARIANT=base
+///    e.g. MAHARAJAH_EMBED__MODEL_ID=nomic-ai/CodeRankEmbed
 pub fn load(global_config: &Path, project_config: Option<&Path>) -> Result<AppConfig> {
     let mut figment = Figment::from(Serialized::defaults(AppConfig::default()))
         .merge(Toml::file(global_config));

@@ -6,7 +6,7 @@ use serde::Serialize;
 use crate::cli::{FindArgs, OutputFormat};
 use crate::config::AppConfig;
 use crate::db::store::{SearchResult, Store};
-use crate::embed::unixcoder::UniXcoderEmbedder;
+use crate::embed::nomic::NomicEmbedder;
 use crate::error::{AppError, Result};
 use crate::indexer;
 
@@ -35,10 +35,9 @@ pub async fn find_cmd(
     }
 
     // Load embedder and embed the query in one spawn_blocking call
-    let variant = config.unixcoder.variant.clone();
     let prompt = args.prompt.clone();
     let vector = tokio::task::spawn_blocking(move || {
-        UniXcoderEmbedder::load(&variant)?.embed(&prompt)
+        NomicEmbedder::load()?.embed_query(&prompt)
     })
     .await
     .map_err(|e| AppError::Other(e.into()))?
@@ -152,10 +151,9 @@ pub async fn query_cmd(
     }
 
     // Load embedder and embed the query in one spawn_blocking call
-    let variant = config.unixcoder.variant.clone();
     let prompt = args.prompt.clone();
     let vector = tokio::task::spawn_blocking(move || {
-        UniXcoderEmbedder::load(&variant)?.embed(&prompt)
+        NomicEmbedder::load()?.embed_query(&prompt)
     })
     .await
     .map_err(|e| AppError::Other(e.into()))?

@@ -99,10 +99,14 @@ impl Store {
         Ok(total)
     }
 
-    pub async fn count_files(&self) -> Result<usize> {
-        use std::collections::HashSet;
-        let mut files: HashSet<String> = HashSet::new();
-        let mut stream = self.table.query().execute().await?;
+    pub async fn list_files(&self) -> Result<std::collections::HashSet<String>> {
+        let mut files = std::collections::HashSet::new();
+        let mut stream = self
+            .table
+            .query()
+            .select(lancedb::query::Select::Columns(vec!["file_path".into()]))
+            .execute()
+            .await?;
         while let Some(batch) = stream.try_next().await? {
             if let Some(col) = batch.column_by_name("file_path") {
                 if let Some(arr) = col.as_any().downcast_ref::<StringArray>() {
@@ -114,7 +118,11 @@ impl Store {
                 }
             }
         }
-        Ok(files.len())
+        Ok(files)
+    }
+
+    pub async fn count_files(&self) -> Result<usize> {
+        Ok(self.list_files().await?.len())
     }
 
     pub async fn clear(&self) -> Result<()> {

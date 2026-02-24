@@ -10,7 +10,7 @@ use sha2::{Digest, Sha256};
 use crate::cli::IndexArgs;
 use crate::config::AppConfig;
 use crate::db::store::{ChunkRecord, Store};
-use crate::embed::unixcoder::UniXcoderEmbedder;
+use crate::embed::nomic::NomicEmbedder;
 use crate::error::{AppError, Result};
 
 pub async fn run(
@@ -27,9 +27,8 @@ pub async fn run(
     )
     .await?;
 
-    let variant = config.unixcoder.variant.clone();
     let embedder = Arc::new(
-        tokio::task::spawn_blocking(move || UniXcoderEmbedder::load(&variant))
+        tokio::task::spawn_blocking(NomicEmbedder::load)
             .await
             .map_err(|e| AppError::Other(e.into()))?
             .map_err(|e| AppError::Embed(e.to_string()))?,
@@ -45,13 +44,14 @@ pub async fn run(
     );
 
     let total = files.len();
+    let max_chunk_lines = args.chunk_lines.unwrap_or(config.index.max_chunk_lines);
     let (indexed, skipped) = index_files(
         &store,
         embedder,
         target_dir,
         &files,
         args.reindex,
-        config.index.max_chunk_lines,
+        max_chunk_lines,
     )
     .await?;
 
@@ -77,9 +77,8 @@ pub async fn refresh(
     )
     .await?;
 
-    let variant = config.unixcoder.variant.clone();
     let embedder = Arc::new(
-        tokio::task::spawn_blocking(move || UniXcoderEmbedder::load(&variant))
+        tokio::task::spawn_blocking(NomicEmbedder::load)
             .await
             .map_err(|e| AppError::Other(e.into()))?
             .map_err(|e| AppError::Embed(e.to_string()))?,
@@ -97,12 +96,28 @@ pub async fn refresh(
 
 async fn index_files(
     store: &Store,
-    embedder: Arc<UniXcoderEmbedder>,
+    embedder: Arc<NomicEmbedder>,
     target_dir: &Path,
     files: &[PathBuf],
     reindex: bool,
     max_chunk_lines: usize,
 ) -> Result<(usize, usize)> {
+    // Detect files that were removed from disk since the last index run.
+    let indexed_paths = store.list_files().await?;
+    let on_disk_paths: std::collections::HashSet<String> = files
+        .iter()
+        .map(|p| {
+            p.strip_prefix(target_dir)
+                .unwrap_or(p)
+                .to_string_lossy()
+                .into_owned()
+        })
+        .collect();
+    for removed in indexed_paths.difference(&on_disk_paths) {
+        store.delete_file(removed).await?;
+        tracing::info!("removed from index (file deleted): {removed}");
+    }
+
     let mut indexed = 0usize;
     let mut skipped = 0usize;
 
@@ -158,10 +173,10 @@ async fn index_files(
         let (vectors, summary_vectors): (Vec<Option<Vec<f32>>>, Vec<Option<Vec<f32>>>) =
             tokio::task::spawn_blocking(move || {
                 let vecs: Vec<Option<Vec<f32>>> =
-                    contents.iter().map(|c| emb.embed(c).ok()).collect();
+                    contents.iter().map(|c| emb.embed_code(c).ok()).collect();
                 let svecs: Vec<Option<Vec<f32>>> = summaries
                     .iter()
-                    .map(|s| s.as_deref().and_then(|text| emb.embed(text).ok()))
+                    .map(|s| s.as_deref().and_then(|text| emb.embed_query(text).ok()))
                     .collect();
                 (vecs, svecs)
             })

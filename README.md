@@ -9,11 +9,11 @@ Named after [Maharajah and the Sepoys](https://en.wikipedia.org/wiki/Maharajah_a
 ## Features
 
 - **No external services required** — embeddings run in-process via [Candle](https://github.com/huggingface/candle); no Ollama, no API keys
-- **UniXcoder embeddings** — Microsoft's code-focused model ([`unixcoder-base-nine`](https://huggingface.co/microsoft/unixcoder-base-nine), fine-tuned on CodeSearchNet for NL↔code retrieval), downloaded from HuggingFace Hub on first run (~125 MB, cached locally)
+- **CodeRankEmbed embeddings** — Nomic's code retrieval model ([`nomic-ai/CodeRankEmbed`](https://huggingface.co/nomic-ai/CodeRankEmbed), 137M parameters, 768-dim, up to 8192 tokens), downloaded from HuggingFace Hub on first run (~550 MB, cached locally)
 - Tree-sitter AST-aware chunking for Rust, Python, JavaScript/JSX, TypeScript/TSX, Go, Java, C#, F#, Scala, Haskell, and Ruby
 - **Pre-computed summaries** from doc comments and docstrings extracted by tree-sitter at index time — shown alongside search results
-- Incremental indexing: SHA-256 hash checks mean only changed files are re-embedded
-- Auto-refresh on `find` — index stays current without a manual `index` step
+- Incremental indexing: SHA-256 hash checks mean only changed files are re-embedded; deleted files are automatically removed from the index
+- Auto-refresh on `find` and `query` — index stays current without a manual `index` step
 - Vector store powered by [LanceDB](https://lancedb.com) (embedded, no server required)
 - Build-artifact directories excluded by default (`target/`, `node_modules/`, `build/`, etc.) — configurable per project
 
@@ -44,8 +44,11 @@ cd /path/to/project
 # Index the project (-D is optional when you're already inside it)
 maharajah index
 
-# Semantic search — returns ranked code chunks with summaries
+# Semantic search — returns ranked code chunks with summaries (content vectors only)
 maharajah find "database connection pooling"
+
+# Semantic search with RRF fusion of content + summary vectors
+maharajah query "database connection pooling"
 
 # ── Or pass the directory explicitly (useful in scripts / CI) ─────────────────
 maharajah -D /path/to/project index
@@ -55,14 +58,13 @@ maharajah -D /path/to/project find "database connection pooling"
 On first run `index` will print progress as it downloads and loads the model:
 
 ```
-[maharajah] Loading UniXcoder embedder (microsoft/unixcoder-base-nine)...
-[maharajah]   resolving config.json
-[maharajah]   resolving vocab.json
-[maharajah]   resolving merges.txt
-[maharajah]   resolving model weights
-[maharajah]   building tokenizer
-[maharajah]   loading model weights
-[maharajah]   ready.
+Loading NomicEmbedder (nomic-ai/CodeRankEmbed)...
+  resolving config.json
+  resolving tokenizer.json
+  resolving model weights
+  building tokenizer
+  loading model weights
+  ready.
 ```
 
 Subsequent runs load directly from the HuggingFace cache (pure filesystem, no network).
@@ -71,8 +73,9 @@ Subsequent runs load directly from the HuggingFace cache (pure filesystem, no ne
 
 | Command | Description |
 |---|---|
-| `index` | Walk the project, embed changed files, store in LanceDB |
-| `find <prompt>` | Embed prompt → vector search → display ranked code chunks with summaries |
+| `index` | Walk the project, embed changed files, store in LanceDB; purge chunks for deleted files |
+| `find <prompt>` | Embed prompt → vector search over code chunks → display ranked results with summaries |
+| `query <prompt>` | Like `find`, but fuses content and summary vector searches with Reciprocal Rank Fusion (RRF) |
 | `db stats` | Show files indexed, chunk count, embedding dimension |
 | `db clear --yes` | Delete all indexed data |
 | `config` | Print resolved configuration as JSON |
@@ -104,23 +107,24 @@ maharajah uses a three-layer configuration model:
 2. **Global config** (`~/.maharajah/maharajah.toml`) — auto-created on first run; edit to change defaults for all projects
 3. **Project config** (`<project-dir>/maharajah.toml`) — optional, never auto-created; overrides the global config for a specific project
 4. **Environment variables** — highest priority; prefixed `MAHARAJAH_`, nested with `__`
-   (e.g. `MAHARAJAH_UNIXCODER__VARIANT=base`)
+   (e.g. `MAHARAJAH_EMBED__MODEL_ID=nomic-ai/CodeRankEmbed`)
 
 ### Example `maharajah.toml`
 
 ```toml
-[unixcoder]
-# "nine" = microsoft/unixcoder-base-nine (default, fine-tuned for code↔NL retrieval)
-# "base" = microsoft/unixcoder-base (general purpose)
-# Both are ~125 MB and downloaded from HuggingFace Hub on first use.
-variant = "nine"
+[embed]
+# HuggingFace model ID to use for embeddings.
+# ~550 MB, downloaded from HuggingFace Hub on first use.
+model_id = "nomic-ai/CodeRankEmbed"
 
 [db]
 table_name = "chunks"
 embedding_dim = 768
 
 [index]
-max_chunk_lines = 40
+# Maximum lines per chunk. With CodeRankEmbed's 8192-token context, larger
+# chunks are viable — 150 lines covers most function definitions comfortably.
+max_chunk_lines = 150
 default_extensions = ["rs", "py", "ts", "tsx", "js", "jsx", "go", "java", "cs", "fs", "fsx", "scala", "hs", "rb"]
 # Glob patterns excluded during indexing (merged with any -x flags passed on the CLI).
 # This list replaces the built-in defaults when set here.
@@ -146,10 +150,10 @@ default_excludes = [
 
 ### Schema migration
 
-If you have an existing index created before summary extraction was added, run:
+If you have an existing index that needs to be rebuilt, run:
 
 ```sh
 maharajah index --reindex
 ```
 
-This rebuilds all embeddings and populates the `summary` column.
+This wipes the index and rebuilds all embeddings from scratch. Required any time you change the embedding model, since vectors from different models are not comparable.
