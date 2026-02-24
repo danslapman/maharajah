@@ -78,7 +78,8 @@ const SCALA_KINDS: &[&str] = &[
 
 const HASKELL_KINDS: &[&str] = &[
     "function",
-    "signature",
+    // `signature` is intentionally omitted: it always appears next to a
+    // `function` node which carries the full definition and the summary.
     "data_type",
     "newtype",
     "class",
@@ -243,7 +244,8 @@ fn parse_with_grammar(
 
     let root = tree.root_node();
     let mut chunks = Vec::new();
-    collect_chunks(root, content, lang_name, interesting_kinds, max_chunk_lines, &mut chunks);
+    let prune_kinds = prune_kinds_for(lang_name);
+    collect_chunks(root, content, lang_name, interesting_kinds, prune_kinds, max_chunk_lines, &mut chunks);
 
     if chunks.is_empty() {
         chunks = chunker::split_by_lines(content, "", lang_name, 0, max_chunk_lines, "", None);
@@ -252,11 +254,25 @@ fn parse_with_grammar(
     chunks
 }
 
+/// Node kinds that should never be recursed into during chunk collection.
+/// This prevents false-positive matches when a grammar reuses the same kind
+/// for structurally different constructs (e.g. Haskell uses `function` for
+/// both top-level definitions and function-type expressions inside signatures).
+fn prune_kinds_for(lang: &str) -> &'static [&'static str] {
+    match lang {
+        // `signature` nodes contain function-type sub-trees whose kind is
+        // `function` — the same kind used for top-level definitions.
+        "haskell" => &["signature"],
+        _ => &[],
+    }
+}
+
 fn collect_chunks(
     node: tree_sitter::Node,
     content: &str,
     lang_name: &str,
     interesting_kinds: &[&str],
+    prune_kinds: &[&str],
     max_chunk_lines: usize,
     chunks: &mut Vec<Chunk>,
 ) {
@@ -299,9 +315,16 @@ fn collect_chunks(
         return;
     }
 
+    // Don't recurse into pruned node kinds — they may contain sub-nodes whose
+    // kind collides with interesting_kinds but represent something different
+    // (e.g. Haskell `function` type-expressions inside `signature` nodes).
+    if prune_kinds.contains(&node.kind()) {
+        return;
+    }
+
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
-        collect_chunks(child, content, lang_name, interesting_kinds, max_chunk_lines, chunks);
+        collect_chunks(child, content, lang_name, interesting_kinds, prune_kinds, max_chunk_lines, chunks);
     }
 }
 
@@ -402,17 +425,49 @@ fn extract_comment(node: tree_sitter::Node, content: &str, lang: &str) -> Option
         return None;
     }
 
-    // Walk preceding named siblings collecting consecutive comment nodes
+    // Walk preceding named siblings collecting consecutive comment nodes.
+    // For Haskell: type signatures (`signature`) sit between the haddock and
+    // the function node — skip over them to reach the haddock.
+    let skip_kinds: &[&str] = if lang == "haskell" { &["signature"] } else { &[] };
+
     let mut comments: Vec<String> = Vec::new();
+    // Track whether we stopped because we ran out of siblings (true) or
+    // because a non-comment, non-skippable sibling blocked us (false).
+    let mut siblings_exhausted = true;
     let mut sib = node.prev_named_sibling();
     while let Some(s) = sib {
         if comment_kinds.contains(&s.kind()) {
             comments.push(strip_comment_markers(&content[s.byte_range()], lang));
             sib = s.prev_named_sibling();
+        } else if skip_kinds.contains(&s.kind()) {
+            sib = s.prev_named_sibling();
         } else {
+            siblings_exhausted = false;
             break;
         }
     }
+
+    // Haskell only: if no comment was found AND we exhausted all siblings
+    // (i.e. were not blocked by another function node), the first function in
+    // a `declarations` block inherits the haddock that precedes the block.
+    // (tree-sitter-haskell places the first function's haddock as a sibling of
+    // `declarations` at the module root, not inside the block itself.)
+    if lang == "haskell" && comments.is_empty() && siblings_exhausted {
+        if let Some(parent) = node.parent() {
+            if parent.kind() == "declarations" {
+                let mut parent_sib = parent.prev_named_sibling();
+                while let Some(ps) = parent_sib {
+                    if comment_kinds.contains(&ps.kind()) {
+                        comments.push(strip_comment_markers(&content[ps.byte_range()], lang));
+                        parent_sib = ps.prev_named_sibling();
+                    } else {
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
     comments.reverse();
 
     let joined = comments.join("\n").trim().to_string();
@@ -444,7 +499,8 @@ fn extract_python_docstring(node: tree_sitter::Node, content: &str) -> Option<St
     None
 }
 
-/// Strip triple-quote (or single-quote) delimiters from a Python string literal.
+/// Strip triple-quote (or single-quote) delimiters from a Python string literal,
+/// then dedent continuation lines so the result has no spurious leading whitespace.
 fn strip_python_docstring(s: &str) -> String {
     let s = s.trim();
     let inner = if s.starts_with("\"\"\"") && s.ends_with("\"\"\"") && s.len() >= 6 {
@@ -458,7 +514,38 @@ fn strip_python_docstring(s: &str) -> String {
     } else {
         s
     };
-    inner.trim().to_string()
+    dedent_docstring(inner)
+}
+
+/// Dedent a docstring body: strip the common leading whitespace from all
+/// non-empty continuation lines (lines after the first).
+fn dedent_docstring(s: &str) -> String {
+    let lines: Vec<&str> = s.lines().collect();
+    if lines.len() <= 1 {
+        return s.trim().to_string();
+    }
+    // Find minimum indentation among non-empty continuation lines
+    let min_indent = lines[1..]
+        .iter()
+        .filter(|l| !l.trim().is_empty())
+        .map(|l| l.len() - l.trim_start().len())
+        .min()
+        .unwrap_or(0);
+
+    let dedented: Vec<&str> = lines
+        .iter()
+        .enumerate()
+        .map(|(i, l)| {
+            if i == 0 {
+                l.trim()
+            } else if l.trim().is_empty() {
+                ""
+            } else {
+                &l[min_indent.min(l.len())..]
+            }
+        })
+        .collect();
+    dedented.join("\n").trim().to_string()
 }
 
 /// Strip comment delimiters from a raw comment node's text.
@@ -490,18 +577,47 @@ fn strip_comment_markers(raw: &str, lang: &str) -> String {
                 if trimmed.starts_with("///") { "///" } else { "//" }
             }
             "python" | "ruby" => "#",
-            "haskell" => "--",
+            // Haddock uses `-- |`; regular Haskell line comments use `--`
+            "haskell" => {
+                if trimmed.starts_with("-- |") { "-- |" } else { "--" }
+            }
             _ => "//",
         };
-        trimmed
+        let stripped = trimmed
             .lines()
             .map(|l| {
                 let s = l.trim();
                 s.strip_prefix(line_prefix).unwrap_or(s).trim()
             })
             .collect::<Vec<_>>()
-            .join("\n")
+            .join("\n");
+
+        // C# XML doc comments use <summary>/<param>/<returns> tags — strip them
+        if lang == "csharp" { strip_xml_tags(&stripped) } else { stripped }
     }
+}
+
+/// Remove XML tags (`<...>`) from a string, keeping only the text content.
+/// Empty lines produced by removing tag-only lines are filtered out.
+fn strip_xml_tags(s: &str) -> String {
+    s.lines()
+        .map(|line| {
+            let mut out = String::new();
+            let mut in_tag = false;
+            for ch in line.chars() {
+                match ch {
+                    '<' => in_tag = true,
+                    '>' => in_tag = false,
+                    _ if !in_tag => out.push(ch),
+                    _ => {}
+                }
+            }
+            out
+        })
+        .map(|l| l.trim().to_string())
+        .filter(|l| !l.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 /// Try to extract a human-readable name for a node by looking for its first

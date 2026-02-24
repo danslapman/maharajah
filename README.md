@@ -8,13 +8,13 @@ Named after [Maharajah and the Sepoys](https://en.wikipedia.org/wiki/Maharajah_a
 
 ## Features
 
-- **No external services required** — embeddings run in-process via [Candle](https://github.com/huggingface/candle); no Ollama, no API keys
-- **CodeRankEmbed embeddings** — Nomic's code retrieval model ([`nomic-ai/CodeRankEmbed`](https://huggingface.co/nomic-ai/CodeRankEmbed), 137M parameters, 768-dim, up to 8192 tokens), downloaded from HuggingFace Hub on first run (~550 MB, cached locally)
-- Tree-sitter AST-aware chunking for Rust, Python, JavaScript/JSX, TypeScript/TSX, Go, Java, C#, F#, Scala, Haskell, and Ruby
-- **Pre-computed summaries** from doc comments and docstrings extracted by tree-sitter at index time — shown alongside search results
-- Incremental indexing: SHA-256 hash checks mean only changed files are re-embedded; deleted files are automatically removed from the index
+- **No external services required** — embeddings run in-process; no Ollama, no API keys
+- **CodeRankEmbed embeddings** — Nomic's code retrieval model ([`nomic-ai/CodeRankEmbed`](https://huggingface.co/nomic-ai/CodeRankEmbed)), downloaded from HuggingFace Hub on first run (~550 MB, cached locally)
+- AST-aware chunking for Rust, Python, JavaScript/JSX, TypeScript/TSX, Go, Java, C#, F#, Scala, Haskell, and Ruby
+- **Pre-computed summaries** from doc comments and docstrings, extracted at index time — shown alongside search results
+- Incremental indexing: only changed files are re-embedded; deleted files are automatically removed from the index
 - Auto-refresh on `find` and `query` — index stays current without a manual `index` step
-- Vector store powered by [LanceDB](https://lancedb.com) (embedded, no server required)
+- Embedded vector store — no server required
 - Build-artifact directories excluded by default (`target/`, `node_modules/`, `build/`, etc.) — configurable per project
 
 ## Prerequisites
@@ -33,7 +33,7 @@ cargo build --release
 cargo install --path .
 ```
 
-> **Note:** Always use a release build for practical use. Debug builds link unoptimized Candle kernels and make even small indexes take many times longer to embed.
+> **Note:** Always use a release build for practical use. Debug builds are significantly slower and make even small indexes take much longer to embed.
 
 ## Quick start
 
@@ -44,10 +44,10 @@ cd /path/to/project
 # Index the project (-D is optional when you're already inside it)
 maharajah index
 
-# Semantic search — returns ranked code chunks with summaries (content vectors only)
+# Semantic search — returns ranked code chunks with summaries
 maharajah find "database connection pooling"
 
-# Semantic search with RRF fusion of content + summary vectors
+# Semantic search with fusion of content and summary results
 maharajah query "database connection pooling"
 
 # ── Or pass the directory explicitly (useful in scripts / CI) ─────────────────
@@ -73,9 +73,9 @@ Subsequent runs load directly from the HuggingFace cache (pure filesystem, no ne
 
 | Command | Description |
 |---|---|
-| `index` | Walk the project, embed changed files, store in LanceDB; purge chunks for deleted files |
-| `find <prompt>` | Embed prompt → vector search over code chunks → display ranked results with summaries |
-| `query <prompt>` | Like `find`, but fuses content and summary vector searches with Reciprocal Rank Fusion (RRF) |
+| `index` | Walk the project, embed changed files, update the index; purge chunks for deleted files |
+| `find <prompt>` | Search for relevant code chunks and display ranked results with summaries |
+| `query <prompt>` | Like `find`, but also searches over summaries and merges the results |
 | `db stats` | Show files indexed, chunk count, embedding dimension |
 | `db clear --yes` | Delete all indexed data |
 | `config` | Print resolved configuration as JSON |
@@ -85,9 +85,46 @@ Subsequent runs load directly from the HuggingFace cache (pure filesystem, no ne
 | Flag | Description |
 |---|---|
 | `-D <dir>` | Project directory to index/query (default: current directory) |
-| `-k <n>` | Number of chunks to retrieve (default: 5) |
+| `-c <file>` | Path to a TOML config file (default: `~/.maharajah/maharajah.toml`) |
+| `-n <n>` | Number of chunks to retrieve (default: 10) |
 | `--format <fmt>` | Output format (`text` or `json`) |
-| `--reindex` | Force re-embedding of all files, ignoring cached hashes |
+
+### JSON output
+
+`--format json` emits a JSON array, one object per result:
+
+```json
+[
+  {
+    "rank": 1,
+    "file_path": "src/collections.rs",
+    "start_line": 12,
+    "end_line": 45,
+    "symbol": "Stack",
+    "score": 0.2103,
+    "summary": "A simple stack backed by a Vec.",
+    "content": "pub struct Stack<T> {\n    data: Vec<T>,\n}\n\nimpl<T> Stack<T> {\n    pub fn new() -> Self { ... }"
+  },
+  {
+    "rank": 2,
+    "file_path": "src/collections.rs",
+    "start_line": 48,
+    "end_line": 61,
+    "symbol": "Queue",
+    "score": 0.3847,
+    "summary": null,
+    "content": "pub struct Queue<T> {\n    data: VecDeque<T>,\n}"
+  }
+]
+```
+
+Fields: `rank` (1-based position), `file_path` (relative to the indexed directory), `start_line`/`end_line` (1-based), `symbol` (function or type name, empty string if unavailable), `score` (lower is more similar), `summary` (extracted doc comment, or `null`).
+
+### `index`-only flags
+
+| Flag | Description |
+|---|---|
+| `--reindex` | Force re-embedding of all files |
 | `-i <glob>` | Include only files matching this glob (repeatable) |
 | `-x <glob>` | Exclude files matching this glob, in addition to the built-in defaults (repeatable) |
 
@@ -122,10 +159,9 @@ table_name = "chunks"
 embedding_dim = 768
 
 [index]
-# Maximum lines per chunk. With CodeRankEmbed's 8192-token context, larger
-# chunks are viable — 150 lines covers most function definitions comfortably.
+# Maximum lines per chunk.
 max_chunk_lines = 150
-default_extensions = ["rs", "py", "ts", "tsx", "js", "jsx", "go", "java", "cs", "fs", "fsx", "scala", "hs", "rb"]
+default_extensions = ["rs", "py", "js", "cjs", "mjs", "jsx", "ts", "tsx", "go", "java", "cs", "fs", "fsx", "scala", "sc", "hs", "rb"]
 # Glob patterns excluded during indexing (merged with any -x flags passed on the CLI).
 # This list replaces the built-in defaults when set here.
 default_excludes = [
