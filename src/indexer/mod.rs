@@ -153,15 +153,25 @@ async fn index_files(
         // Embed all chunks for this file in one spawn_blocking call
         let emb = Arc::clone(&embedder);
         let contents: Vec<String> = chunks.iter().map(|c| c.content.clone()).collect();
-        let vectors: Vec<Option<Vec<f32>>> =
+        let summaries: Vec<Option<String>> = chunks.iter().map(|c| c.summary.clone()).collect();
+
+        let (vectors, summary_vectors): (Vec<Option<Vec<f32>>>, Vec<Option<Vec<f32>>>) =
             tokio::task::spawn_blocking(move || {
-                contents.iter().map(|c| emb.embed(c).ok()).collect()
+                let vecs: Vec<Option<Vec<f32>>> =
+                    contents.iter().map(|c| emb.embed(c).ok()).collect();
+                let svecs: Vec<Option<Vec<f32>>> = summaries
+                    .iter()
+                    .map(|s| s.as_deref().and_then(|text| emb.embed(text).ok()))
+                    .collect();
+                (vecs, svecs)
             })
             .await
             .map_err(|e| AppError::Other(e.into()))?;
 
         let mut records = Vec::with_capacity(chunks.len());
-        for (chunk, vector_opt) in chunks.into_iter().zip(vectors) {
+        for ((chunk, vector_opt), summary_vector) in
+            chunks.into_iter().zip(vectors).zip(summary_vectors)
+        {
             let vector = match vector_opt {
                 Some(v) => v,
                 None => {
@@ -181,11 +191,12 @@ async fn index_files(
                 end_line: chunk.end_line,
                 vector,
                 summary: chunk.summary,
+                summary_vector,
             });
         }
 
         store.insert(&records).await?;
-        eprintln!("[maharajah] indexed: {rel_path} ({} chunks)", records.len());
+        tracing::info!("indexed: {rel_path} ({} chunks)", records.len());
         indexed += 1;
     }
 

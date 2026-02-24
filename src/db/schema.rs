@@ -4,16 +4,17 @@ use std::sync::Arc;
 /// Arrow schema for indexed code chunks stored in LanceDB.
 ///
 /// Columns:
-/// - id         : unique chunk identifier (file_path:start_line)
-/// - file_path  : source file path
-/// - file_hash  : SHA-256 hex of file content (for incremental updates)
-/// - language   : detected language (rust, python, ...)
-/// - symbol     : tree-sitter node name (fn/class name, or empty string)
-/// - content    : raw source text of the chunk
-/// - start_line : 0-based start line in file
-/// - end_line   : 0-based end line in file
-/// - summary    : extracted docstring/comment summary (nullable)
-/// - vector     : embedding vector (FixedSizeList<Float32>)
+/// - id             : unique chunk identifier (file_path:start_line)
+/// - file_path      : source file path
+/// - file_hash      : SHA-256 hex of file content (for incremental updates)
+/// - language       : detected language (rust, python, ...)
+/// - symbol         : tree-sitter node name (fn/class name, or empty string)
+/// - content        : raw source text of the chunk
+/// - start_line     : 0-based start line in file
+/// - end_line       : 0-based end line in file
+/// - summary        : extracted docstring/comment summary (nullable)
+/// - vector         : content embedding vector (FixedSizeList<Float32>)
+/// - summary_vector : summary embedding vector (FixedSizeList<Float32>, nullable)
 pub fn chunks_schema(embedding_dim: usize) -> Arc<Schema> {
     Arc::new(Schema::new(Fields::from(vec![
         Field::new("id", DataType::Utf8, false),
@@ -32,6 +33,14 @@ pub fn chunks_schema(embedding_dim: usize) -> Arc<Schema> {
                 embedding_dim as i32,
             ),
             false,
+        ),
+        Field::new(
+            "summary_vector",
+            DataType::FixedSizeList(
+                Arc::new(Field::new("item", DataType::Float32, true)),
+                embedding_dim as i32,
+            ),
+            true,  // nullable — None when chunk has no summary
         ),
     ])))
 }

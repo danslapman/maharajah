@@ -23,9 +23,11 @@ pub struct ChunkRecord {
     pub end_line: u32,
     pub vector: Vec<f32>,
     pub summary: Option<String>,
+    pub summary_vector: Option<Vec<f32>>,
 }
 
 pub struct SearchResult {
+    pub id: String,
     pub file_path: String,
     pub start_line: u32,
     pub end_line: u32,
@@ -171,6 +173,8 @@ impl Store {
         let mut summary_builder = StringBuilder::new();
         let mut vector_builder =
             FixedSizeListBuilder::new(Float32Builder::new(), self.embedding_dim as i32);
+        let mut summary_vector_builder =
+            FixedSizeListBuilder::new(Float32Builder::new(), self.embedding_dim as i32);
 
         for chunk in chunks {
             id_builder.append_value(&chunk.id);
@@ -186,6 +190,22 @@ impl Store {
                 vector_builder.values().append_value(v);
             }
             vector_builder.append(true);
+            match &chunk.summary_vector {
+                Some(sv) => {
+                    for &v in sv {
+                        summary_vector_builder.values().append_value(v);
+                    }
+                    summary_vector_builder.append(true);
+                }
+                None => {
+                    // Arrow FixedSizeList invariant: child.len() must always equal
+                    // list.len() * item_size, even for null entries.
+                    for _ in 0..self.embedding_dim {
+                        summary_vector_builder.values().append_value(0.0);
+                    }
+                    summary_vector_builder.append(false);
+                }
+            }
         }
 
         let batch = RecordBatch::try_new(
@@ -201,6 +221,7 @@ impl Store {
                 Arc::new(end_line_builder.finish()),
                 Arc::new(summary_builder.finish()),
                 Arc::new(vector_builder.finish()),
+                Arc::new(summary_vector_builder.finish()),
             ],
         )
         .map_err(|e| AppError::Other(e.into()))?;
@@ -218,6 +239,7 @@ impl Store {
         let mut stream = self
             .table
             .vector_search(vector)?
+            .column("vector")
             .limit(limit)
             .execute()
             .await?;
@@ -225,6 +247,7 @@ impl Store {
         let mut results = Vec::new();
         while let Some(batch) = stream.try_next().await? {
             for i in 0..batch.num_rows() {
+                let id = get_str_col(&batch, "id", i)?;
                 let file_path = get_str_col(&batch, "file_path", i)?;
                 let symbol = get_str_col(&batch, "symbol", i)?;
                 let content = get_str_col(&batch, "content", i)?;
@@ -234,6 +257,49 @@ impl Store {
                 let summary = get_nullable_str_col(&batch, "summary", i)?;
 
                 results.push(SearchResult {
+                    id,
+                    file_path,
+                    start_line,
+                    end_line,
+                    symbol,
+                    content,
+                    score,
+                    summary,
+                });
+            }
+        }
+
+        Ok(results)
+    }
+
+    pub async fn search_by_summary(
+        &self,
+        vector: &[f32],
+        limit: usize,
+    ) -> Result<Vec<SearchResult>> {
+        let mut stream = self
+            .table
+            .vector_search(vector)?
+            .column("summary_vector")
+            .only_if("summary IS NOT NULL")
+            .limit(limit)
+            .execute()
+            .await?;
+
+        let mut results = Vec::new();
+        while let Some(batch) = stream.try_next().await? {
+            for i in 0..batch.num_rows() {
+                let id = get_str_col(&batch, "id", i)?;
+                let file_path = get_str_col(&batch, "file_path", i)?;
+                let symbol = get_str_col(&batch, "symbol", i)?;
+                let content = get_str_col(&batch, "content", i)?;
+                let start_line = get_u32_col(&batch, "start_line", i)?;
+                let end_line = get_u32_col(&batch, "end_line", i)?;
+                let score = get_f32_col(&batch, "_distance", i).unwrap_or(0.0);
+                let summary = get_nullable_str_col(&batch, "summary", i)?;
+
+                results.push(SearchResult {
+                    id,
                     file_path,
                     start_line,
                     end_line,

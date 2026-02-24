@@ -172,20 +172,20 @@ impl UniXcoderEmbedder {
         let var = UniXcoderVariant::from_str(variant);
         let model_id = var.repo_id();
 
-        eprintln!("[maharajah] Loading UniXcoder embedder ({model_id})...");
+        tracing::info!("Loading UniXcoder embedder ({model_id})...");
         let device = Device::Cpu;
         let repo = Api::new()?.model(model_id.to_string());
 
-        eprintln!("[maharajah]   resolving config.json");
+        tracing::info!("  resolving config.json");
         let config_path = hf_get(&repo, model_id, "config.json").context("config.json")?;
 
-        eprintln!("[maharajah]   resolving vocab.json");
+        tracing::info!("  resolving vocab.json");
         let vocab_path = hf_get(&repo, model_id, "vocab.json").context("vocab.json")?;
 
-        eprintln!("[maharajah]   resolving merges.txt");
+        tracing::info!("  resolving merges.txt");
         let merges_path = hf_get(&repo, model_id, "merges.txt").context("merges.txt")?;
 
-        eprintln!("[maharajah]   resolving model weights");
+        tracing::info!("  resolving model weights");
         let (weights_path, use_safetensors) =
             match hf_get(&repo, model_id, "model.safetensors") {
                 Ok(p) => (p, true),
@@ -196,10 +196,10 @@ impl UniXcoderEmbedder {
                 ),
             };
 
-        eprintln!("[maharajah]   building tokenizer");
+        tracing::info!("  building tokenizer");
         let tokenizer = build_tokenizer(&vocab_path, &merges_path)?;
 
-        eprintln!("[maharajah]   loading model weights");
+        tracing::info!("  loading model weights");
         let config: Config =
             serde_json::from_str(&std::fs::read_to_string(&config_path)?)?;
         let vb = if use_safetensors {
@@ -211,7 +211,7 @@ impl UniXcoderEmbedder {
         };
         let model = UniXcoderModel::load(vb, &config)?;
 
-        eprintln!("[maharajah]   ready.");
+        tracing::info!("  ready.");
         Ok(Self { model, tokenizer, device })
     }
 

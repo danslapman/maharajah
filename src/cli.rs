@@ -32,8 +32,11 @@ pub enum Commands {
     /// Index source files into the vector database
     Index(IndexArgs),
 
-    /// Find relevant code chunks by semantic similarity
+    /// Find relevant code chunks by semantic similarity (content vectors only)
     Find(FindArgs),
+
+    /// Search using both content and summary embeddings, merged with RRF
+    Query(FindArgs),
 
     /// Manage the vector database (stats, clear)
     Db(DbArgs),

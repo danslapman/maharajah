@@ -52,6 +52,9 @@ async fn main() -> Result<()> {
         Commands::Find(args) => {
             rag::retriever::find_cmd(&cfg, &db_path, &target_dir, args).await?;
         }
+        Commands::Query(args) => {
+            rag::retriever::query_cmd(&cfg, &db_path, &target_dir, args).await?;
+        }
         Commands::Db(args) => {
             match args.action {
                 DbAction::Stats => {

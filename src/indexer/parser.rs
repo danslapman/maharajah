@@ -3,6 +3,11 @@ use tree_sitter::{Language, Parser};
 
 use crate::indexer::chunker;
 
+#[cfg(test)]
+#[path = "parser_tests.rs"]
+mod parser_tests;
+
+
 pub struct Chunk {
     pub language: String,
     pub symbol: String,
@@ -110,7 +115,8 @@ const GO_KINDS: &[&str] = &[
 const RUBY_KINDS: &[&str] = &["method", "class", "module", "singleton_method", "singleton_class"];
 
 const FSHARP_KINDS: &[&str] = &[
-    "function_or_value_defn",
+    // value_declaration wraps function_or_value_defn; comments sit before value_declaration
+    "value_declaration",
     "type_defn",
     "module_defn",
     "namespace",
@@ -355,7 +361,7 @@ fn is_summary_kind(lang: &str, kind: &str) -> bool {
             kind,
             "method" | "class" | "module" | "singleton_method" | "singleton_class"
         ),
-        "fsharp" => matches!(kind, "function_or_value_defn" | "type_defn"),
+        "fsharp" => matches!(kind, "value_declaration" | "type_defn"),
         _ => false,
     }
 }
@@ -369,8 +375,10 @@ fn comment_kinds_for(lang: &str) -> &'static [&'static str] {
         "csharp" => &["comment", "block_comment"],
         "javascript" | "typescript" | "tsx" => &["comment"],
         "go" => &["comment"],
-        "scala" => &["comment"],
-        "haskell" => &["comment", "block_comment"],
+        // tree-sitter-scala uses "block_comment" for /** */ scaladoc
+        "scala" => &["comment", "block_comment"],
+        // tree-sitter-haskell uses "haddock" for -- | doc comments
+        "haskell" => &["comment", "block_comment", "haddock"],
         "ruby" => &["comment"],
         "fsharp" => &["block_comment", "line_comment"],
         _ => &[],
@@ -502,8 +510,30 @@ fn get_node_name(node: &tree_sitter::Node, content: &str) -> String {
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
         match child.kind() {
+            // Most languages: identifier or type-identifier node kinds
             "identifier" | "type_identifier" | "simple_identifier" | "name" => {
                 return content[child.byte_range()].to_string();
+            }
+            // Ruby: class/module names are `constant` nodes
+            "constant" => {
+                return content[child.byte_range()].to_string();
+            }
+            // Haskell: function names are `variable` nodes
+            "variable" => {
+                return content[child.byte_range()].to_string();
+            }
+            // F#: function name is the first word of function_declaration_left /
+            // value_declaration_left (e.g. "pow (b: int) (e: int)" → "pow")
+            "function_declaration_left" | "value_declaration_left" => {
+                let text = &content[child.byte_range()];
+                return text.split_whitespace().next().unwrap_or("").to_string();
+            }
+            // F#: value_declaration wraps function_or_value_defn — delegate one level down
+            "function_or_value_defn" => {
+                let name = get_node_name(&child, content);
+                if !name.is_empty() {
+                    return name;
+                }
             }
             _ => continue,
         }
