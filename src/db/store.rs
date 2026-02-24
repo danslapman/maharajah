@@ -2,12 +2,11 @@ use std::path::Path;
 use std::sync::Arc;
 
 use arrow_array::{
-    Float32Array, RecordBatch, RecordBatchIterator, StringArray, UInt32Array,
+    Array, Float32Array, RecordBatch, RecordBatchIterator, StringArray, UInt32Array,
     builder::{FixedSizeListBuilder, Float32Builder, StringBuilder, UInt32Builder},
 };
 use arrow_schema::ArrowError;
 use futures::TryStreamExt;
-use arrow_array::Array;
 use lancedb::query::{ExecutableQuery, QueryBase};
 
 use crate::db::schema::chunks_schema;
@@ -23,15 +22,19 @@ pub struct ChunkRecord {
     pub start_line: u32,
     pub end_line: u32,
     pub vector: Vec<f32>,
+    pub summary: Option<String>,
+    pub summary_vector: Option<Vec<f32>>,
 }
 
 pub struct SearchResult {
+    pub id: String,
     pub file_path: String,
     pub start_line: u32,
     pub end_line: u32,
     pub symbol: String,
     pub content: String,
     pub score: f32,
+    pub summary: Option<String>,
 }
 
 pub struct Store {
@@ -96,10 +99,14 @@ impl Store {
         Ok(total)
     }
 
-    pub async fn count_files(&self) -> Result<usize> {
-        use std::collections::HashSet;
-        let mut files: HashSet<String> = HashSet::new();
-        let mut stream = self.table.query().execute().await?;
+    pub async fn list_files(&self) -> Result<std::collections::HashSet<String>> {
+        let mut files = std::collections::HashSet::new();
+        let mut stream = self
+            .table
+            .query()
+            .select(lancedb::query::Select::Columns(vec!["file_path".into()]))
+            .execute()
+            .await?;
         while let Some(batch) = stream.try_next().await? {
             if let Some(col) = batch.column_by_name("file_path") {
                 if let Some(arr) = col.as_any().downcast_ref::<StringArray>() {
@@ -111,7 +118,11 @@ impl Store {
                 }
             }
         }
-        Ok(files.len())
+        Ok(files)
+    }
+
+    pub async fn count_files(&self) -> Result<usize> {
+        Ok(self.list_files().await?.len())
     }
 
     pub async fn clear(&self) -> Result<()> {
@@ -167,7 +178,10 @@ impl Store {
         let mut content_builder = StringBuilder::new();
         let mut start_line_builder = UInt32Builder::new();
         let mut end_line_builder = UInt32Builder::new();
+        let mut summary_builder = StringBuilder::new();
         let mut vector_builder =
+            FixedSizeListBuilder::new(Float32Builder::new(), self.embedding_dim as i32);
+        let mut summary_vector_builder =
             FixedSizeListBuilder::new(Float32Builder::new(), self.embedding_dim as i32);
 
         for chunk in chunks {
@@ -179,10 +193,27 @@ impl Store {
             content_builder.append_value(&chunk.content);
             start_line_builder.append_value(chunk.start_line);
             end_line_builder.append_value(chunk.end_line);
+            summary_builder.append_option(chunk.summary.as_deref());
             for &v in &chunk.vector {
                 vector_builder.values().append_value(v);
             }
             vector_builder.append(true);
+            match &chunk.summary_vector {
+                Some(sv) => {
+                    for &v in sv {
+                        summary_vector_builder.values().append_value(v);
+                    }
+                    summary_vector_builder.append(true);
+                }
+                None => {
+                    // Arrow FixedSizeList invariant: child.len() must always equal
+                    // list.len() * item_size, even for null entries.
+                    for _ in 0..self.embedding_dim {
+                        summary_vector_builder.values().append_value(0.0);
+                    }
+                    summary_vector_builder.append(false);
+                }
+            }
         }
 
         let batch = RecordBatch::try_new(
@@ -196,7 +227,9 @@ impl Store {
                 Arc::new(content_builder.finish()),
                 Arc::new(start_line_builder.finish()),
                 Arc::new(end_line_builder.finish()),
+                Arc::new(summary_builder.finish()),
                 Arc::new(vector_builder.finish()),
+                Arc::new(summary_vector_builder.finish()),
             ],
         )
         .map_err(|e| AppError::Other(e.into()))?;
@@ -214,6 +247,7 @@ impl Store {
         let mut stream = self
             .table
             .vector_search(vector)?
+            .column("vector")
             .limit(limit)
             .execute()
             .await?;
@@ -221,20 +255,66 @@ impl Store {
         let mut results = Vec::new();
         while let Some(batch) = stream.try_next().await? {
             for i in 0..batch.num_rows() {
+                let id = get_str_col(&batch, "id", i)?;
                 let file_path = get_str_col(&batch, "file_path", i)?;
                 let symbol = get_str_col(&batch, "symbol", i)?;
                 let content = get_str_col(&batch, "content", i)?;
                 let start_line = get_u32_col(&batch, "start_line", i)?;
                 let end_line = get_u32_col(&batch, "end_line", i)?;
                 let score = get_f32_col(&batch, "_distance", i).unwrap_or(0.0);
+                let summary = get_nullable_str_col(&batch, "summary", i)?;
 
                 results.push(SearchResult {
+                    id,
                     file_path,
                     start_line,
                     end_line,
                     symbol,
                     content,
                     score,
+                    summary,
+                });
+            }
+        }
+
+        Ok(results)
+    }
+
+    pub async fn search_by_summary(
+        &self,
+        vector: &[f32],
+        limit: usize,
+    ) -> Result<Vec<SearchResult>> {
+        let mut stream = self
+            .table
+            .vector_search(vector)?
+            .column("summary_vector")
+            .only_if("summary IS NOT NULL")
+            .limit(limit)
+            .execute()
+            .await?;
+
+        let mut results = Vec::new();
+        while let Some(batch) = stream.try_next().await? {
+            for i in 0..batch.num_rows() {
+                let id = get_str_col(&batch, "id", i)?;
+                let file_path = get_str_col(&batch, "file_path", i)?;
+                let symbol = get_str_col(&batch, "symbol", i)?;
+                let content = get_str_col(&batch, "content", i)?;
+                let start_line = get_u32_col(&batch, "start_line", i)?;
+                let end_line = get_u32_col(&batch, "end_line", i)?;
+                let score = get_f32_col(&batch, "_distance", i).unwrap_or(0.0);
+                let summary = get_nullable_str_col(&batch, "summary", i)?;
+
+                results.push(SearchResult {
+                    id,
+                    file_path,
+                    start_line,
+                    end_line,
+                    symbol,
+                    content,
+                    score,
+                    summary,
                 });
             }
         }
@@ -252,6 +332,27 @@ fn get_str_col(batch: &RecordBatch, name: &str, row: usize) -> Result<String> {
         .downcast_ref::<StringArray>()
         .ok_or_else(|| AppError::Other(anyhow::anyhow!("column {} is not StringArray", name)))?;
     Ok(arr.value(row).to_string())
+}
+
+fn get_nullable_str_col(
+    batch: &RecordBatch,
+    name: &str,
+    row: usize,
+) -> Result<Option<String>> {
+    let col = match batch.column_by_name(name) {
+        Some(c) => c,
+        // Column absent (e.g. old schema before migration) — treat as NULL
+        None => return Ok(None),
+    };
+    let arr = col
+        .as_any()
+        .downcast_ref::<StringArray>()
+        .ok_or_else(|| AppError::Other(anyhow::anyhow!("column {} is not StringArray", name)))?;
+    if arr.is_null(row) {
+        Ok(None)
+    } else {
+        Ok(Some(arr.value(row).to_string()))
+    }
 }
 
 fn get_u32_col(batch: &RecordBatch, name: &str, row: usize) -> Result<u32> {

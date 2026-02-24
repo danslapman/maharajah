@@ -9,21 +9,16 @@ use crate::error::Result;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {
-    pub ollama: OllamaConfig,
+    pub embed: EmbedConfig,
     pub db: DbConfig,
     pub index: IndexConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct OllamaConfig {
-    /// Base URL of the Ollama server
-    pub base_url: String,
-    /// Model used for generating embeddings
-    pub embed_model: String,
-    /// Model used for text generation in RAG answers
-    pub generate_model: String,
-    /// Request timeout in seconds
-    pub timeout_secs: u64,
+pub struct EmbedConfig {
+    /// HuggingFace model ID to use for embeddings.
+    /// Defaults to "nomic-ai/CodeRankEmbed" (~550 MB, downloaded on first run).
+    pub model_id: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -47,18 +42,15 @@ pub struct IndexConfig {
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
-            ollama: OllamaConfig {
-                base_url: "http://localhost:11434".into(),
-                embed_model: "nomic-embed-text".into(),
-                generate_model: "llama3.2".into(),
-                timeout_secs: 120,
+            embed: EmbedConfig {
+                model_id: "nomic-ai/CodeRankEmbed".into(),
             },
             db: DbConfig {
                 table_name: "chunks".into(),
                 embedding_dim: 768,
             },
             index: IndexConfig {
-                max_chunk_lines: 40,
+                max_chunk_lines: 150,
                 default_extensions: vec![
                     "rs".into(),
                     "py".into(),
@@ -140,18 +132,15 @@ const DEFAULT_GLOBAL_CONFIG: &str = r#"# maharajah global configuration
 # This file was created automatically. Edit as needed.
 # Project-level overrides go in maharajah.toml in the project directory.
 
-[ollama]
-base_url = "http://localhost:11434"
-embed_model = "nomic-embed-text"
-generate_model = "llama3.2"
-timeout_secs = 120
+[embed]
+model_id = "nomic-ai/CodeRankEmbed"   # ~550 MB, downloaded from HuggingFace Hub on first run
 
 [db]
 table_name = "chunks"
 embedding_dim = 768
 
 [index]
-max_chunk_lines = 40
+max_chunk_lines = 150
 default_extensions = ["rs", "py", "js", "cjs", "mjs", "jsx", "ts", "tsx", "go", "java", "cs", "fs", "fsx", "scala", "sc", "hs", "rb"]
 default_excludes = [
     "**/target/**",
@@ -178,7 +167,7 @@ default_excludes = [
 /// 2. Global config file (~/.maharajah/maharajah.toml) — silently ignored if missing
 /// 3. Project config file (<target-dir>/maharajah.toml) — only merged if Some
 /// 4. Environment variables prefixed with MAHARAJAH_ (nested with __)
-///    e.g. MAHARAJAH_OLLAMA__BASE_URL=http://remote:11434
+///    e.g. MAHARAJAH_EMBED__MODEL_ID=nomic-ai/CodeRankEmbed
 pub fn load(global_config: &Path, project_config: Option<&Path>) -> Result<AppConfig> {
     let mut figment = Figment::from(Serialized::defaults(AppConfig::default()))
         .merge(Toml::file(global_config));
@@ -192,18 +181,4 @@ pub fn load(global_config: &Path, project_config: Option<&Path>) -> Result<AppCo
         .extract()?;
 
     Ok(config)
-}
-
-/// Apply top-level CLI flag overrides onto an already-loaded config.
-pub fn apply_cli_overrides(
-    config: &mut AppConfig,
-    ollama_url: Option<String>,
-    embed_model: Option<String>,
-) {
-    if let Some(url) = ollama_url {
-        config.ollama.base_url = url;
-    }
-    if let Some(model) = embed_model {
-        config.ollama.embed_model = model;
-    }
 }

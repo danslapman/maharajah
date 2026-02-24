@@ -3,14 +3,15 @@ pub mod parser;
 pub mod walker;
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use sha2::{Digest, Sha256};
 
 use crate::cli::IndexArgs;
 use crate::config::AppConfig;
 use crate::db::store::{ChunkRecord, Store};
-use crate::embed::ollama::OllamaEmbedder;
-use crate::error::Result;
+use crate::embed::nomic::NomicEmbedder;
+use crate::error::{AppError, Result};
 
 pub async fn run(
     config: &AppConfig,
@@ -26,7 +27,12 @@ pub async fn run(
     )
     .await?;
 
-    let embedder = OllamaEmbedder::new(config.ollama.clone())?;
+    let embedder = Arc::new(
+        tokio::task::spawn_blocking(NomicEmbedder::load)
+            .await
+            .map_err(|e| AppError::Other(e.into()))?
+            .map_err(|e| AppError::Embed(e.to_string()))?,
+    );
 
     let mut exclude = args.exclude.clone();
     exclude.extend_from_slice(&config.index.default_excludes);
@@ -38,8 +44,16 @@ pub async fn run(
     );
 
     let total = files.len();
-    let (indexed, skipped) =
-        index_files(&store, &embedder, target_dir, &files, args.reindex, config.index.max_chunk_lines).await?;
+    let max_chunk_lines = args.chunk_lines.unwrap_or(config.index.max_chunk_lines);
+    let (indexed, skipped) = index_files(
+        &store,
+        embedder,
+        target_dir,
+        &files,
+        args.reindex,
+        max_chunk_lines,
+    )
+    .await?;
 
     println!(
         "Done. {total} files found: {indexed} indexed, {skipped} skipped (unchanged or binary)."
@@ -63,7 +77,12 @@ pub async fn refresh(
     )
     .await?;
 
-    let embedder = OllamaEmbedder::new(config.ollama.clone())?;
+    let embedder = Arc::new(
+        tokio::task::spawn_blocking(NomicEmbedder::load)
+            .await
+            .map_err(|e| AppError::Other(e.into()))?
+            .map_err(|e| AppError::Embed(e.to_string()))?,
+    );
 
     let files = walker::collect_files(
         target_dir,
@@ -72,17 +91,33 @@ pub async fn refresh(
         &config.index.default_extensions,
     );
 
-    index_files(&store, &embedder, target_dir, &files, false, config.index.max_chunk_lines).await
+    index_files(&store, embedder, target_dir, &files, false, config.index.max_chunk_lines).await
 }
 
 async fn index_files(
     store: &Store,
-    embedder: &OllamaEmbedder,
+    embedder: Arc<NomicEmbedder>,
     target_dir: &Path,
     files: &[PathBuf],
     reindex: bool,
     max_chunk_lines: usize,
 ) -> Result<(usize, usize)> {
+    // Detect files that were removed from disk since the last index run.
+    let indexed_paths = store.list_files().await?;
+    let on_disk_paths: std::collections::HashSet<String> = files
+        .iter()
+        .map(|p| {
+            p.strip_prefix(target_dir)
+                .unwrap_or(p)
+                .to_string_lossy()
+                .into_owned()
+        })
+        .collect();
+    for removed in indexed_paths.difference(&on_disk_paths) {
+        store.delete_file(removed).await?;
+        tracing::info!("removed from index (file deleted): {removed}");
+    }
+
     let mut indexed = 0usize;
     let mut skipped = 0usize;
 
@@ -125,13 +160,37 @@ async fn index_files(
         };
 
         let chunks = parser::parse_file(path, &content, max_chunk_lines);
+        if chunks.is_empty() {
+            skipped += 1;
+            continue;
+        }
+
+        // Embed all chunks for this file in one spawn_blocking call
+        let emb = Arc::clone(&embedder);
+        let contents: Vec<String> = chunks.iter().map(|c| c.content.clone()).collect();
+        let summaries: Vec<Option<String>> = chunks.iter().map(|c| c.summary.clone()).collect();
+
+        let (vectors, summary_vectors): (Vec<Option<Vec<f32>>>, Vec<Option<Vec<f32>>>) =
+            tokio::task::spawn_blocking(move || {
+                let vecs: Vec<Option<Vec<f32>>> =
+                    contents.iter().map(|c| emb.embed_code(c).ok()).collect();
+                let svecs: Vec<Option<Vec<f32>>> = summaries
+                    .iter()
+                    .map(|s| s.as_deref().and_then(|text| emb.embed_query(text).ok()))
+                    .collect();
+                (vecs, svecs)
+            })
+            .await
+            .map_err(|e| AppError::Other(e.into()))?;
 
         let mut records = Vec::with_capacity(chunks.len());
-        for chunk in chunks {
-            let vector = match embedder.embed(&chunk.content).await {
-                Ok(v) => v,
-                Err(e) => {
-                    eprintln!("Warning: embed failed for {}: {}", rel_path, e);
+        for ((chunk, vector_opt), summary_vector) in
+            chunks.into_iter().zip(vectors).zip(summary_vectors)
+        {
+            let vector = match vector_opt {
+                Some(v) => v,
+                None => {
+                    eprintln!("Warning: embed failed for {}", rel_path);
                     continue;
                 }
             };
@@ -146,10 +205,13 @@ async fn index_files(
                 start_line: chunk.start_line,
                 end_line: chunk.end_line,
                 vector,
+                summary: chunk.summary,
+                summary_vector,
             });
         }
 
         store.insert(&records).await?;
+        tracing::info!("indexed: {rel_path} ({} chunks)", records.len());
         indexed += 1;
     }
 

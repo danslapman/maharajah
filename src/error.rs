@@ -13,9 +13,6 @@ pub enum AppError {
     #[error("Embedding error: {0}")]
     Embed(String),
 
-    #[error("LLM error: {0}")]
-    Llm(String),
-
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
 

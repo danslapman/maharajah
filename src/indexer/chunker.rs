@@ -2,12 +2,15 @@ use crate::indexer::parser::Chunk;
 
 /// Split `content` into overlapping windows of at most `max_lines` lines.
 /// `start_offset` is the line number of the first line of `content` within the original file.
+/// `node_kind` and `summary` are propagated from the parent AST node to all sub-chunks.
 pub fn split_by_lines(
     content: &str,
     symbol: &str,
     language: &str,
     start_offset: u32,
     max_lines: usize,
+    node_kind: &str,
+    summary: Option<&str>,
 ) -> Vec<Chunk> {
     let lines: Vec<&str> = content.lines().collect();
     if lines.is_empty() {
@@ -30,6 +33,8 @@ pub fn split_by_lines(
             content: chunk_content,
             start_line,
             end_line,
+            node_kind: node_kind.to_string(),
+            summary: summary.map(|s| s.to_string()),
         });
 
         offset += max_lines;
