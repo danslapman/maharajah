@@ -408,6 +408,32 @@ fn comment_kinds_for(lang: &str) -> &'static [&'static str] {
     }
 }
 
+/// Returns true if a comment node (identified by its raw text and tree-sitter
+/// kind) is a *documentation* comment rather than an ordinary implementation
+/// comment or commented-out code.
+///
+/// Each language has a distinct documentation comment convention:
+/// - Rust/C#/F#: `///` (triple-slash)
+/// - Java/JS/TS/TSX/Scala: `/** … */` (Javadoc / JSDoc / Scaladoc)
+/// - Haskell: `-- |` Haddock (tree-sitter kind `"haddock"`) or `{-| … -}`
+/// - Go/Ruby/Python: every `//` / `#` comment immediately preceding a
+///   declaration is considered documentation (godoc / YARD / pydoc convention)
+fn is_doc_comment(raw: &str, lang: &str, kind: &str) -> bool {
+    let trimmed = raw.trim();
+    match lang {
+        "rust" => trimmed.starts_with("///") || trimmed.starts_with("/**"),
+        "csharp" | "fsharp" => trimmed.starts_with("///") || trimmed.starts_with("/**"),
+        "java" => trimmed.starts_with("/**"),
+        "javascript" | "typescript" | "tsx" => trimmed.starts_with("/**"),
+        "scala" => trimmed.starts_with("/**"),
+        // Only Haddock-marked comments are documentation; plain `--` comments
+        // (kind == "comment") are implementation notes and must not be used.
+        "haskell" => kind == "haddock" || trimmed.starts_with("{-|"),
+        // Go, Ruby, Python: the preceding comment block is the documentation
+        _ => true,
+    }
+}
+
 /// Extract the docstring or preceding comment block for a node.
 fn extract_comment(node: tree_sitter::Node, content: &str, lang: &str) -> Option<String> {
     // Python: check for docstring as first statement in the body
@@ -437,8 +463,17 @@ fn extract_comment(node: tree_sitter::Node, content: &str, lang: &str) -> Option
     let mut sib = node.prev_named_sibling();
     while let Some(s) = sib {
         if comment_kinds.contains(&s.kind()) {
-            comments.push(strip_comment_markers(&content[s.byte_range()], lang));
-            sib = s.prev_named_sibling();
+            let raw = &content[s.byte_range()];
+            if is_doc_comment(raw, lang, s.kind()) {
+                comments.push(strip_comment_markers(raw, lang));
+                sib = s.prev_named_sibling();
+            } else {
+                // A non-doc comment (implementation note, commented-out code,
+                // etc.) immediately before the symbol blocks collection — it
+                // separates the symbol from any real doc comment above.
+                siblings_exhausted = false;
+                break;
+            }
         } else if skip_kinds.contains(&s.kind()) {
             sib = s.prev_named_sibling();
         } else {
@@ -457,8 +492,9 @@ fn extract_comment(node: tree_sitter::Node, content: &str, lang: &str) -> Option
             if parent.kind() == "declarations" {
                 let mut parent_sib = parent.prev_named_sibling();
                 while let Some(ps) = parent_sib {
-                    if comment_kinds.contains(&ps.kind()) {
-                        comments.push(strip_comment_markers(&content[ps.byte_range()], lang));
+                    let raw = &content[ps.byte_range()];
+                    if comment_kinds.contains(&ps.kind()) && is_doc_comment(raw, lang, ps.kind()) {
+                        comments.push(strip_comment_markers(raw, lang));
                         parent_sib = ps.prev_named_sibling();
                     } else {
                         break;

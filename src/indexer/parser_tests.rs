@@ -412,4 +412,128 @@ mod parser_tests {
             &["///", "let isPrime", "(n: int)"],
         );
     }
+
+    // ── Non-doc comments must not become summaries ────────────────────────────
+    //
+    // Regression: a plain `--` comment containing code-like text was being
+    // used as the summary for the following Haskell function because
+    // `comment_kinds_for("haskell")` previously included the `"comment"` kind
+    // alongside `"haddock"`. The same risk exists for `//` comments in Rust,
+    // Java, JS, TS, Scala, C#, and F# where only a specific marker (`///`,
+    // `/**`) denotes documentation.
+
+    /// Assert that every chunk for `symbol` has `summary == None`.
+    /// Also verifies the symbol was actually parsed (prevents vacuous passes
+    /// when tree-sitter produces no output for invalid input).
+    fn assert_no_summary_for(
+        chunks: &[crate::indexer::parser::Chunk],
+        symbol: &str,
+        context: &str,
+    ) {
+        assert!(
+            chunks.iter().any(|c| c.symbol == symbol),
+            "{context}: symbol {symbol:?} not found in chunks — check the test fixture"
+        );
+        for c in chunks.iter().filter(|c| c.symbol == symbol) {
+            assert!(
+                c.summary.is_none(),
+                "{context}: non-doc comment must not become a summary for '{symbol}', got {:?}",
+                c.summary
+            );
+        }
+    }
+
+    #[test]
+    fn non_doc_comment_does_not_become_summary() {
+        // ── Haskell: plain `--` (not `-- |`) ─────────────────────────────────
+        // Directly reproduces the reported bug: a commented-out guard line was
+        // showing up as the summary of the following function.
+        // Note: tree-sitter-haskell uses `function` for definitions with
+        // arguments (patterns), and `bind` for zero-argument value bindings;
+        // we need a function with an argument to hit the affected code path.
+        {
+            let src = concat!(
+                "module T where\n",
+                "-- foo apiUser _ _ | not apiUser.allowed = throwError err402\n",
+                "foo :: Int -> Int\n",
+                "foo x = x + 1\n",
+            );
+            let chunks = parse_file(Path::new("t.hs"), src, 80);
+            assert_no_summary_for(&chunks, "foo", "haskell plain -- comment");
+        }
+
+        // ── Rust: plain `//` (not `///`) ──────────────────────────────────────
+        {
+            let src = concat!(
+                "// plain implementation note, not a doc comment\n",
+                "fn add(a: i32, b: i32) -> i32 { a + b }\n",
+            );
+            let chunks = parse_file(Path::new("t.rs"), src, 80);
+            assert_no_summary_for(&chunks, "add", "rust plain // comment");
+        }
+
+        // ── Java: `//` line comment (not `/** */` Javadoc) ───────────────────
+        {
+            let src = concat!(
+                "// plain implementation note, not javadoc\n",
+                "public static int add(int a, int b) { return a + b; }\n",
+            );
+            let chunks = parse_file(Path::new("t.java"), src, 80);
+            assert_no_summary_for(&chunks, "add", "java plain // comment");
+        }
+
+        // ── JavaScript: `//` (not `/** */` JSDoc) ────────────────────────────
+        {
+            let src = concat!(
+                "// plain implementation note, not jsdoc\n",
+                "function add(a, b) { return a + b; }\n",
+            );
+            let chunks = parse_file(Path::new("t.js"), src, 80);
+            assert_no_summary_for(&chunks, "add", "javascript plain // comment");
+        }
+
+        // ── TypeScript: `//` (not `/** */` JSDoc) ────────────────────────────
+        {
+            let src = concat!(
+                "// plain implementation note, not jsdoc\n",
+                "function add(a: number, b: number): number { return a + b; }\n",
+            );
+            let chunks = parse_file(Path::new("t.ts"), src, 80);
+            assert_no_summary_for(&chunks, "add", "typescript plain // comment");
+        }
+
+        // ── Scala: `//` (not `/** */` Scaladoc) ──────────────────────────────
+        {
+            let src = concat!(
+                "// plain implementation note, not scaladoc\n",
+                "def add(a: Int, b: Int): Int = a + b\n",
+            );
+            let chunks = parse_file(Path::new("t.scala"), src, 80);
+            assert_no_summary_for(&chunks, "add", "scala plain // comment");
+        }
+
+        // ── C#: `//` (not `///` XML doc) ─────────────────────────────────────
+        // Note: collect_chunks doesn't recurse into class_declaration, so we
+        // test a top-level class (the outermost interesting node) rather than
+        // a method inside one.
+        {
+            let src = concat!(
+                "// plain implementation note, not xml doc\n",
+                "public class Widget { }\n",
+            );
+            let chunks = parse_file(Path::new("t.cs"), src, 80);
+            assert_no_summary_for(&chunks, "Widget", "csharp plain // comment");
+        }
+
+        // ── F#: `//` (not `///` XML doc) ─────────────────────────────────────
+        {
+            let src = concat!(
+                "module T\n",
+                "// plain implementation note, not xml doc\n",
+                "let add (a: int) (b: int) : int = a + b\n",
+            );
+            let chunks = parse_file(Path::new("t.fs"), src, 80);
+            assert_no_summary_for(&chunks, "add", "fsharp plain // comment");
+        }
+    }
 }
