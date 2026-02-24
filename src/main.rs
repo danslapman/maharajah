@@ -40,20 +40,14 @@ async fn main() -> Result<()> {
     let project_cfg = project_cfg_path.exists().then_some(project_cfg_path.as_path());
 
     // 5. Load layered config
-    let mut cfg = config::load(&global_cfg_path, project_cfg)?;
+    let cfg = config::load(&global_cfg_path, project_cfg)?;
 
-    // 6. Apply CLI overrides
-    config::apply_cli_overrides(&mut cfg, cli.ollama_url, cli.embed_model);
-
-    // 7. Compute DB path from target dir
+    // 6. Compute DB path from target dir
     let db_path = config::db_path(&target_dir);
 
     match cli.command {
         Commands::Index(args) => {
             indexer::run(&cfg, &db_path, &target_dir, args).await?;
-        }
-        Commands::Query(args) => {
-            rag::pipeline::run(&cfg, &db_path, &target_dir, args).await?;
         }
         Commands::Find(args) => {
             rag::retriever::find_cmd(&cfg, &db_path, &target_dir, args).await?;
@@ -61,7 +55,9 @@ async fn main() -> Result<()> {
         Commands::Db(args) => {
             match args.action {
                 DbAction::Stats => {
-                    match Store::try_open(&db_path, cfg.db.embedding_dim, &cfg.db.table_name).await? {
+                    match Store::try_open(&db_path, cfg.db.embedding_dim, &cfg.db.table_name)
+                        .await?
+                    {
                         None => println!("No index found. Run `index` first."),
                         Some(store) => {
                             let chunks = store.count_rows().await?;
@@ -76,7 +72,9 @@ async fn main() -> Result<()> {
                     if !yes {
                         println!("Pass --yes to confirm clearing all indexed data.");
                     } else {
-                        match Store::try_open(&db_path, cfg.db.embedding_dim, &cfg.db.table_name).await? {
+                        match Store::try_open(&db_path, cfg.db.embedding_dim, &cfg.db.table_name)
+                            .await?
+                        {
                             None => println!("No index found. Nothing to clear."),
                             Some(store) => {
                                 store.clear().await?;

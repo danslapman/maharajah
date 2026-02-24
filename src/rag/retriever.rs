@@ -5,8 +5,8 @@ use serde::Serialize;
 use crate::cli::{FindArgs, OutputFormat};
 use crate::config::AppConfig;
 use crate::db::store::Store;
-use crate::embed::ollama::OllamaEmbedder;
-use crate::error::Result;
+use crate::embed::unixcoder::UniXcoderEmbedder;
+use crate::error::{AppError, Result};
 use crate::indexer;
 
 #[derive(Serialize)]
@@ -18,17 +18,30 @@ struct JsonResult {
     symbol: String,
     score: f32,
     content: String,
+    summary: Option<String>,
 }
 
-pub async fn find_cmd(config: &AppConfig, db_path: &Path, target_dir: &Path, args: FindArgs) -> Result<()> {
+pub async fn find_cmd(
+    config: &AppConfig,
+    db_path: &Path,
+    target_dir: &Path,
+    args: FindArgs,
+) -> Result<()> {
     // Auto-refresh changed files before searching
     let (refreshed, _) = indexer::refresh(config, db_path, target_dir).await?;
     if refreshed > 0 {
         println!("[auto-refresh: {refreshed} file(s) updated]");
     }
 
-    let embedder = OllamaEmbedder::new(config.ollama.clone())?;
-    let vector = embedder.embed(&args.prompt).await?;
+    // Load embedder and embed the query in one spawn_blocking call
+    let variant = config.unixcoder.variant.clone();
+    let prompt = args.prompt.clone();
+    let vector = tokio::task::spawn_blocking(move || {
+        UniXcoderEmbedder::load(&variant)?.embed(&prompt)
+    })
+    .await
+    .map_err(|e| AppError::Other(e.into()))?
+    .map_err(|e| AppError::Embed(e.to_string()))?;
 
     let store = Store::open_or_create(
         db_path,
@@ -62,7 +75,9 @@ pub async fn find_cmd(config: &AppConfig, db_path: &Path, target_dir: &Path, arg
                     r.end_line,
                     symbol_display
                 );
-                // Print first 3 lines of content as preview
+                if let Some(ref s) = r.summary {
+                    println!("  summary: {}", s);
+                }
                 let preview: String = r
                     .content
                     .lines()
@@ -86,6 +101,7 @@ pub async fn find_cmd(config: &AppConfig, db_path: &Path, target_dir: &Path, arg
                     symbol: r.symbol,
                     score: r.score,
                     content: r.content,
+                    summary: r.summary,
                 })
                 .collect();
             println!(

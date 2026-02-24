@@ -12,6 +12,7 @@ use std::sync::Arc;
 /// - content    : raw source text of the chunk
 /// - start_line : 0-based start line in file
 /// - end_line   : 0-based end line in file
+/// - summary    : extracted docstring/comment summary (nullable)
 /// - vector     : embedding vector (FixedSizeList<Float32>)
 pub fn chunks_schema(embedding_dim: usize) -> Arc<Schema> {
     Arc::new(Schema::new(Fields::from(vec![
@@ -23,6 +24,7 @@ pub fn chunks_schema(embedding_dim: usize) -> Arc<Schema> {
         Field::new("content", DataType::Utf8, false),
         Field::new("start_line", DataType::UInt32, false),
         Field::new("end_line", DataType::UInt32, false),
+        Field::new("summary", DataType::Utf8, true),
         Field::new(
             "vector",
             DataType::FixedSizeList(

@@ -17,8 +17,13 @@ figment = { version = "0.10", features = ["toml", "env"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 
-# Ollama client (embeddings + generation)
-ollama-rs = { version = "0.3", features = ["stream"] }
+# UniXcoder embeddings (Candle — pure Rust, no Python)
+candle-core = "0.9"
+candle-nn = "0.9"
+candle-transformers = "0.9"
+tokenizers = "0.21"
+hf-hub = "0.5"
+ureq = "2"
 
 # Vector database
 lancedb = "0.26"

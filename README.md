@@ -1,6 +1,6 @@
 # maharajah
 
-A local RAG (Retrieval-Augmented Generation) engine for source code.
+A local semantic code search engine.
 
 ## Name
 
@@ -8,29 +8,32 @@ Named after [Maharajah and the Sepoys](https://en.wikipedia.org/wiki/Maharajah_a
 
 ## Features
 
-- Runs entirely locally via [Ollama](https://ollama.com) — no external API keys required
-- Incremental indexing: SHA-256 hash checks mean only changed files are re-embedded
+- **No external services required** — embeddings run in-process via [Candle](https://github.com/huggingface/candle); no Ollama, no API keys
+- **UniXcoder embeddings** — Microsoft's code-focused model ([`unixcoder-base-nine`](https://huggingface.co/microsoft/unixcoder-base-nine), fine-tuned on CodeSearchNet for NL↔code retrieval), downloaded from HuggingFace Hub on first run (~125 MB, cached locally)
 - Tree-sitter AST-aware chunking for Rust, Python, JavaScript/JSX, TypeScript/TSX, Go, Java, C#, F#, Scala, Haskell, and Ruby
-- Auto-refresh on `find`/`query` — index stays current without a manual `index` step
+- **Pre-computed summaries** from doc comments and docstrings extracted by tree-sitter at index time — shown alongside search results
+- Incremental indexing: SHA-256 hash checks mean only changed files are re-embedded
+- Auto-refresh on `find` — index stays current without a manual `index` step
 - Vector store powered by [LanceDB](https://lancedb.com) (embedded, no server required)
 - Build-artifact directories excluded by default (`target/`, `node_modules/`, `build/`, etc.) — configurable per project
 
 ## Prerequisites
 
 - Rust toolchain (stable)
-- Ollama running locally (`http://localhost:11434`)
-- Required models pulled:
-  ```sh
-  ollama pull nomic-embed-text
-  ollama pull llama3.2
-  ```
+
+That's it. Model weights are downloaded automatically on first use.
 
 ## Installation
 
 ```sh
-# From source
+# Build in release mode (strongly recommended — debug builds are ~10x slower for inference)
+cargo build --release
+
+# Or install to ~/.cargo/bin
 cargo install --path .
 ```
+
+> **Note:** Always use a release build for practical use. Debug builds link unoptimized Candle kernels and make even small indexes take many times longer to embed.
 
 ## Quick start
 
@@ -41,24 +44,35 @@ cd /path/to/project
 # Index the project (-D is optional when you're already inside it)
 maharajah index
 
-# Ask a question
-maharajah query "How does authentication work?"
-
-# Semantic search (no LLM generation)
+# Semantic search — returns ranked code chunks with summaries
 maharajah find "database connection pooling"
 
 # ── Or pass the directory explicitly (useful in scripts / CI) ─────────────────
 maharajah -D /path/to/project index
-maharajah -D /path/to/project query "How does authentication work?"
+maharajah -D /path/to/project find "database connection pooling"
 ```
+
+On first run `index` will print progress as it downloads and loads the model:
+
+```
+[maharajah] Loading UniXcoder embedder (microsoft/unixcoder-base-nine)...
+[maharajah]   resolving config.json
+[maharajah]   resolving vocab.json
+[maharajah]   resolving merges.txt
+[maharajah]   resolving model weights
+[maharajah]   building tokenizer
+[maharajah]   loading model weights
+[maharajah]   ready.
+```
+
+Subsequent runs load directly from the HuggingFace cache (pure filesystem, no network).
 
 ## Commands
 
 | Command | Description |
 |---|---|
 | `index` | Walk the project, embed changed files, store in LanceDB |
-| `query <question>` | Full RAG pipeline: embed → retrieve → stream answer |
-| `find <prompt>` | Semantic search only; returns ranked code chunks |
+| `find <prompt>` | Embed prompt → vector search → display ranked code chunks with summaries |
 | `db stats` | Show files indexed, chunk count, embedding dimension |
 | `db clear --yes` | Delete all indexed data |
 | `config` | Print resolved configuration as JSON |
@@ -68,9 +82,7 @@ maharajah -D /path/to/project query "How does authentication work?"
 | Flag | Description |
 |---|---|
 | `-D <dir>` | Project directory to index/query (default: current directory) |
-| `-k <n>` | Number of chunks to retrieve for context (default: 5) |
-| `--model <name>` | Override the generation model for this invocation |
-| `--show-context` | Print retrieved source chunks alongside the answer |
+| `-k <n>` | Number of chunks to retrieve (default: 5) |
 | `--format <fmt>` | Output format (`text` or `json`) |
 | `--reindex` | Force re-embedding of all files, ignoring cached hashes |
 | `-i <glob>` | Include only files matching this glob (repeatable) |
@@ -92,16 +104,16 @@ maharajah uses a three-layer configuration model:
 2. **Global config** (`~/.maharajah/maharajah.toml`) — auto-created on first run; edit to change defaults for all projects
 3. **Project config** (`<project-dir>/maharajah.toml`) — optional, never auto-created; overrides the global config for a specific project
 4. **Environment variables** — highest priority; prefixed `MAHARAJAH_`, nested with `__`
-   (e.g. `MAHARAJAH_OLLAMA__BASE_URL=http://gpu-box:11434`)
+   (e.g. `MAHARAJAH_UNIXCODER__VARIANT=base`)
 
 ### Example `maharajah.toml`
 
 ```toml
-[ollama]
-base_url = "http://localhost:11434"
-embed_model = "nomic-embed-text"
-generate_model = "llama3.2"
-timeout_secs = 120
+[unixcoder]
+# "nine" = microsoft/unixcoder-base-nine (default, fine-tuned for code↔NL retrieval)
+# "base" = microsoft/unixcoder-base (general purpose)
+# Both are ~125 MB and downloaded from HuggingFace Hub on first use.
+variant = "nine"
 
 [db]
 table_name = "chunks"
@@ -132,3 +144,12 @@ default_excludes = [
 ]
 ```
 
+### Schema migration
+
+If you have an existing index created before summary extraction was added, run:
+
+```sh
+maharajah index --reindex
+```
+
+This rebuilds all embeddings and populates the `summary` column.

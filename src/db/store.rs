@@ -2,12 +2,11 @@ use std::path::Path;
 use std::sync::Arc;
 
 use arrow_array::{
-    Float32Array, RecordBatch, RecordBatchIterator, StringArray, UInt32Array,
+    Array, Float32Array, RecordBatch, RecordBatchIterator, StringArray, UInt32Array,
     builder::{FixedSizeListBuilder, Float32Builder, StringBuilder, UInt32Builder},
 };
 use arrow_schema::ArrowError;
 use futures::TryStreamExt;
-use arrow_array::Array;
 use lancedb::query::{ExecutableQuery, QueryBase};
 
 use crate::db::schema::chunks_schema;
@@ -23,6 +22,7 @@ pub struct ChunkRecord {
     pub start_line: u32,
     pub end_line: u32,
     pub vector: Vec<f32>,
+    pub summary: Option<String>,
 }
 
 pub struct SearchResult {
@@ -32,6 +32,7 @@ pub struct SearchResult {
     pub symbol: String,
     pub content: String,
     pub score: f32,
+    pub summary: Option<String>,
 }
 
 pub struct Store {
@@ -167,6 +168,7 @@ impl Store {
         let mut content_builder = StringBuilder::new();
         let mut start_line_builder = UInt32Builder::new();
         let mut end_line_builder = UInt32Builder::new();
+        let mut summary_builder = StringBuilder::new();
         let mut vector_builder =
             FixedSizeListBuilder::new(Float32Builder::new(), self.embedding_dim as i32);
 
@@ -179,6 +181,7 @@ impl Store {
             content_builder.append_value(&chunk.content);
             start_line_builder.append_value(chunk.start_line);
             end_line_builder.append_value(chunk.end_line);
+            summary_builder.append_option(chunk.summary.as_deref());
             for &v in &chunk.vector {
                 vector_builder.values().append_value(v);
             }
@@ -196,6 +199,7 @@ impl Store {
                 Arc::new(content_builder.finish()),
                 Arc::new(start_line_builder.finish()),
                 Arc::new(end_line_builder.finish()),
+                Arc::new(summary_builder.finish()),
                 Arc::new(vector_builder.finish()),
             ],
         )
@@ -227,6 +231,7 @@ impl Store {
                 let start_line = get_u32_col(&batch, "start_line", i)?;
                 let end_line = get_u32_col(&batch, "end_line", i)?;
                 let score = get_f32_col(&batch, "_distance", i).unwrap_or(0.0);
+                let summary = get_nullable_str_col(&batch, "summary", i)?;
 
                 results.push(SearchResult {
                     file_path,
@@ -235,6 +240,7 @@ impl Store {
                     symbol,
                     content,
                     score,
+                    summary,
                 });
             }
         }
@@ -252,6 +258,27 @@ fn get_str_col(batch: &RecordBatch, name: &str, row: usize) -> Result<String> {
         .downcast_ref::<StringArray>()
         .ok_or_else(|| AppError::Other(anyhow::anyhow!("column {} is not StringArray", name)))?;
     Ok(arr.value(row).to_string())
+}
+
+fn get_nullable_str_col(
+    batch: &RecordBatch,
+    name: &str,
+    row: usize,
+) -> Result<Option<String>> {
+    let col = match batch.column_by_name(name) {
+        Some(c) => c,
+        // Column absent (e.g. old schema before migration) — treat as NULL
+        None => return Ok(None),
+    };
+    let arr = col
+        .as_any()
+        .downcast_ref::<StringArray>()
+        .ok_or_else(|| AppError::Other(anyhow::anyhow!("column {} is not StringArray", name)))?;
+    if arr.is_null(row) {
+        Ok(None)
+    } else {
+        Ok(Some(arr.value(row).to_string()))
+    }
 }
 
 fn get_u32_col(batch: &RecordBatch, name: &str, row: usize) -> Result<u32> {
