@@ -26,6 +26,7 @@ pub struct ChunkRecord {
     pub summary_vector: Option<Vec<f32>>,
 }
 
+#[derive(serde::Serialize)]
 pub struct SearchResult {
     pub id: String,
     pub file_path: String,

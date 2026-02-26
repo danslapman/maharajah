@@ -14,7 +14,8 @@ Named after [Maharajah and the Sepoys](https://en.wikipedia.org/wiki/Maharajah_a
 - **Pre-computed summaries** from doc comments and docstrings, extracted at index time — shown alongside search results
 - Incremental indexing: only changed files are re-embedded; deleted files are automatically removed from the index
 - Auto-refresh on `find` and `query` — index stays current without a manual `index` step
-- Embedded vector store — no server required
+- **HTTP server mode** — expose `/find` and `/query` over HTTP with automatic background re-indexing on file changes
+- Embedded vector store — no external database required
 - Build-artifact directories excluded by default (`target/`, `node_modules/`, `build/`, etc.) — configurable per project
 
 ## Prerequisites
@@ -78,6 +79,7 @@ Subsequent runs load directly from the HuggingFace cache (pure filesystem, no ne
 | `query <prompt>` | Like `find`, but also searches over summaries and merges the results |
 | `db stats` | Show files indexed, chunk count, embedding dimension |
 | `db clear --yes` | Delete all indexed data |
+| `server` | Start an HTTP server exposing `/find` and `/query` endpoints |
 | `config` | Print resolved configuration as JSON |
 
 ### Common flags
@@ -119,6 +121,49 @@ Subsequent runs load directly from the HuggingFace cache (pure filesystem, no ne
 ```
 
 Fields: `rank` (1-based position), `file_path` (relative to the indexed directory), `start_line`/`end_line` (1-based), `symbol` (function or type name, empty string if unavailable), `score` (lower is more similar), `summary` (extracted doc comment, or `null`).
+
+### Server mode
+
+`mh server` starts an HTTP API server backed by the same local index.
+
+```sh
+# Start on the default address (127.0.0.1:8080)
+mh -D /path/to/project server
+
+# Bind to a different host/port
+mh -D /path/to/project server --host 0.0.0.0 --port 9090
+```
+
+The model is loaded once at startup. While the server is running it watches the project directory for file changes and re-indexes modified files in the background — no manual `index` step needed.
+
+#### `POST /find`
+
+Searches using content vectors only (equivalent to `mh find`).
+
+```sh
+curl -X POST http://localhost:8080/find \
+  -H 'Content-Type: application/json' \
+  -d '{"query": "database connection pooling", "limit": 5}'
+```
+
+#### `POST /query`
+
+Searches using both content and summary vectors, merged with Reciprocal Rank Fusion (equivalent to `mh query`).
+
+```sh
+curl -X POST http://localhost:8080/query \
+  -H 'Content-Type: application/json' \
+  -d '{"query": "database connection pooling"}'
+```
+
+Both endpoints accept `query` (required) and `limit` (optional, default `10`). They return a JSON array in the same shape as `--format json`, minus the `rank` field.
+
+#### `server`-only flags
+
+| Flag | Description |
+|---|---|
+| `--host <addr>` | Address to bind to (default: `127.0.0.1`) |
+| `--port <port>` | Port to listen on (default: `8080`) |
 
 ### `index`-only flags
 
