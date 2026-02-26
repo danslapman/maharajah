@@ -5,6 +5,7 @@ mod embed;
 mod error;
 mod indexer;
 mod rag;
+mod server;
 
 use anyhow::Result;
 use clap::Parser;
@@ -24,10 +25,13 @@ async fn main() -> Result<()> {
     };
     fmt().with_env_filter(EnvFilter::new(filter)).init();
 
-    // 1. Resolve target directory
+    // 1. Resolve target directory (canonicalize to absolute path so the walker
+    //    never receives "." as root, which would be excluded as a hidden dir)
     let target_dir = cli
         .target_dir
-        .unwrap_or_else(|| std::env::current_dir().expect("cannot read current directory"));
+        .unwrap_or_else(|| std::env::current_dir().expect("cannot read current directory"))
+        .canonicalize()
+        .expect("cannot resolve target directory");
 
     // 2. Resolve global config path (overridable via --config)
     let global_cfg_path = cli.config.unwrap_or_else(config::global_config_path);
@@ -90,6 +94,9 @@ async fn main() -> Result<()> {
         }
         Commands::Config => {
             println!("{}", serde_json::to_string_pretty(&cfg)?);
+        }
+        Commands::Server(args) => {
+            server::run_server(args, cfg, db_path, target_dir).await?;
         }
     }
 

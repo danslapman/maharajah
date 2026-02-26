@@ -43,6 +43,20 @@ pub enum Commands {
 
     /// Print the resolved configuration as JSON and exit
     Config,
+
+    /// Run as an HTTP server exposing /find and /query endpoints
+    Server(ServerArgs),
+}
+
+#[derive(Args, Debug)]
+pub struct ServerArgs {
+    /// Host address to bind to
+    #[arg(long, default_value = "127.0.0.1")]
+    pub host: String,
+
+    /// Port to listen on
+    #[arg(long, default_value_t = 8080)]
+    pub port: u16,
 }
 
 #[derive(Args, Debug)]

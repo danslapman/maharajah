@@ -115,7 +115,7 @@ pub async fn find_cmd(
     Ok(())
 }
 
-fn rrf_merge(
+pub(crate) fn rrf_merge(
     content_results: Vec<SearchResult>,
     summary_results: Vec<SearchResult>,
     limit: usize,
