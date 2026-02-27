@@ -10,6 +10,7 @@ pub struct SearchRequest {
     pub query: String,
     #[serde(default = "default_limit")]
     pub limit: usize,
+    pub min_score: Option<f32>,
 }
 
 fn default_limit() -> usize {
@@ -53,7 +54,12 @@ pub async fn find_handler(
     };
 
     match store.search(&vector, body.limit).await {
-        Ok(results) => HttpResponse::Ok().json(results),
+        Ok(results) => {
+            let filtered: Vec<_> = results.into_iter()
+                .filter(|r| body.min_score.map_or(true, |t| r.score >= t))
+                .collect();
+            HttpResponse::Ok().json(filtered)
+        }
         Err(e) => HttpResponse::InternalServerError().body(e.to_string()),
     }
 }
@@ -72,7 +78,13 @@ pub async fn query_handler(
         tokio::join!(store.search(&vector, limit), store.search_by_summary(&vector, limit));
 
     match (content_res, summary_res) {
-        (Ok(content), Ok(summary)) => HttpResponse::Ok().json(rrf_merge(content, summary, limit)),
+        (Ok(content), Ok(summary)) => {
+            let merged = rrf_merge(content, summary, limit);
+            let filtered: Vec<_> = merged.into_iter()
+                .filter(|r| body.min_score.map_or(true, |t| r.score >= t))
+                .collect();
+            HttpResponse::Ok().json(filtered)
+        }
         (Err(e), _) | (_, Err(e)) => HttpResponse::InternalServerError().body(e.to_string()),
     }
 }

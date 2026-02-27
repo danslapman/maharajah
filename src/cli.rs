@@ -87,6 +87,10 @@ pub struct FindArgs {
     #[arg(short = 'n', long, default_value_t = 10)]
     pub limit: usize,
 
+    /// Only return results with score >= this threshold
+    #[arg(long)]
+    pub min_score: Option<f32>,
+
     /// Output format
     #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
     pub format: OutputFormat,

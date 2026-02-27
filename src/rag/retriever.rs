@@ -52,6 +52,9 @@ pub async fn find_cmd(
     .await?;
 
     let results = store.search(&vector, args.limit).await?;
+    let results: Vec<_> = results.into_iter()
+        .filter(|r| args.min_score.map_or(true, |t| r.score >= t))
+        .collect();
 
     if results.is_empty() {
         println!("No results found.");
@@ -170,6 +173,9 @@ pub async fn query_cmd(
     let content_results = store.search(&vector, args.limit).await?;
     let summary_results = store.search_by_summary(&vector, args.limit).await?;
     let results = rrf_merge(content_results, summary_results, args.limit);
+    let results: Vec<_> = results.into_iter()
+        .filter(|r| args.min_score.map_or(true, |t| r.score >= t))
+        .collect();
 
     if results.is_empty() {
         println!("No results found.");

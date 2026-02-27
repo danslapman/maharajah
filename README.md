@@ -89,6 +89,7 @@ Subsequent runs load directly from the HuggingFace cache (pure filesystem, no ne
 | `-D <dir>` | Project directory to index/query (default: current directory) |
 | `-c <file>` | Path to a TOML config file (default: `~/.maharajah/maharajah.toml`) |
 | `-n <n>` | Number of chunks to retrieve (default: 10) |
+| `--min-score <f>` | Only return results with `score >= f`; omit to return all results |
 | `--format <fmt>` | Output format (`text` or `json`) |
 
 ### JSON output
@@ -120,7 +121,7 @@ Subsequent runs load directly from the HuggingFace cache (pure filesystem, no ne
 ]
 ```
 
-Fields: `rank` (1-based position), `file_path` (relative to the indexed directory), `start_line`/`end_line` (1-based), `symbol` (function or type name, empty string if unavailable), `score` (lower is more similar), `summary` (extracted doc comment, or `null`).
+Fields: `rank` (1-based position), `file_path` (relative to the indexed directory), `start_line`/`end_line` (1-based), `symbol` (function or type name, empty string if unavailable), `score` (Euclidean distance for `find` — lower is more similar; RRF score for `query` — higher is better), `summary` (extracted doc comment, or `null`).
 
 ### Server mode
 
@@ -156,7 +157,7 @@ curl -X POST http://localhost:8080/query \
   -d '{"query": "database connection pooling"}'
 ```
 
-Both endpoints accept `query` (required) and `limit` (optional, default `10`). They return a JSON array in the same shape as `--format json`, minus the `rank` field.
+Both endpoints accept `query` (required), `limit` (optional, default `10`), and `min_score` (optional — only results with `score >= min_score` are returned). They return a JSON array in the same shape as `--format json`, minus the `rank` field.
 
 #### `server`-only flags
 
