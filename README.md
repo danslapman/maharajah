@@ -10,7 +10,7 @@ Named after [Maharajah and the Sepoys](https://en.wikipedia.org/wiki/Maharajah_a
 
 - **No external services required** — embeddings run in-process; no Ollama, no API keys
 - **CodeRankEmbed embeddings** — Nomic's code retrieval model ([`nomic-ai/CodeRankEmbed`](https://huggingface.co/nomic-ai/CodeRankEmbed)), downloaded from HuggingFace Hub on first run (~550 MB, cached locally)
-- AST-aware chunking for Rust, Python, JavaScript/JSX, TypeScript/TSX, Go, Java, C#, F#, Scala, Haskell, and Ruby
+- AST-aware chunking for Rust, Python, JavaScript/JSX, TypeScript/TSX, Go, Java, Kotlin, C#, F#, Scala, Haskell, and Ruby
 - **Pre-computed summaries** from doc comments and docstrings, extracted at index time — shown alongside search results
 - Incremental indexing: only changed files are re-embedded; deleted files are automatically removed from the index
 - Auto-refresh on `find` and `query` — index stays current without a manual `index` step
@@ -207,7 +207,7 @@ embedding_dim = 768
 [index]
 # Maximum lines per chunk.
 max_chunk_lines = 150
-default_extensions = ["rs", "py", "js", "cjs", "mjs", "jsx", "ts", "tsx", "go", "java", "cs", "fs", "fsx", "scala", "sc", "hs", "rb"]
+default_extensions = ["rs", "py", "js", "cjs", "mjs", "jsx", "ts", "tsx", "go", "java", "cs", "fs", "fsx", "scala", "sc", "hs", "rb", "kt", "kts"]
 # Glob patterns excluded during indexing (merged with any -x flags passed on the CLI).
 # This list replaces the built-in defaults when set here.
 default_excludes = [

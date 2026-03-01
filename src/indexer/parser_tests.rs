@@ -413,6 +413,46 @@ mod parser_tests {
         );
     }
 
+    // ── Kotlin ────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn kotlin_example_chunks() {
+        let content = include_str!("../../example/geometry.kt");
+        let chunks = parse_file(Path::new("geometry.kt"), content, 40);
+        let syms = symbols(&chunks);
+        assert!(chunks.len() >= 4, "expected ≥4 chunks, got {}: {:?}", chunks.len(), syms);
+        assert!(syms.contains(&"Vector2"), "missing symbol 'Vector2'");
+        assert!(syms.contains(&"distance"), "missing symbol 'distance'");
+        assert!(syms.contains(&"BoundingBox"), "missing symbol 'BoundingBox'");
+        assert!(syms.contains(&"Angles"), "missing symbol 'Angles'");
+        assert!(has_summary(&chunks), "no summaries extracted for kotlin example");
+
+        assert_summary_ok(
+            summary_for(&chunks, "Vector2"),
+            "Vector2",
+            "2D vector",
+            &["/**", "*/", "data class", "val x"],
+        );
+        assert_summary_ok(
+            summary_for(&chunks, "distance"),
+            "distance",
+            "Euclidean distance",
+            &["/**", "*/", "fun distance", "Double {"],
+        );
+        assert_summary_ok(
+            summary_for(&chunks, "BoundingBox"),
+            "BoundingBox",
+            "bounding box",
+            &["/**", "*/", "class BoundingBox", "val minX"],
+        );
+        assert_summary_ok(
+            summary_for(&chunks, "Angles"),
+            "Angles",
+            "angle conversion",
+            &["/**", "*/", "object Angles"],
+        );
+    }
+
     // ── Non-doc comments must not become summaries ────────────────────────────
     //
     // Regression: a plain `--` comment containing code-like text was being
@@ -534,6 +574,16 @@ mod parser_tests {
             );
             let chunks = parse_file(Path::new("t.fs"), src, 80);
             assert_no_summary_for(&chunks, "add", "fsharp plain // comment");
+        }
+
+        // ── Kotlin: `//` (not `/** */` KDoc) ─────────────────────────────────
+        {
+            let src = concat!(
+                "// plain implementation note, not kdoc\n",
+                "fun add(a: Int, b: Int): Int = a + b\n",
+            );
+            let chunks = parse_file(Path::new("t.kt"), src, 80);
+            assert_no_summary_for(&chunks, "add", "kotlin plain // comment");
         }
     }
 }

@@ -69,6 +69,8 @@ impl Default for AppConfig {
                     "sc".into(),
                     "hs".into(),
                     "rb".into(),
+                    "kt".into(),
+                    "kts".into(),
                 ],
                 default_excludes: vec![
                     // Rust (cargo) — root and workspace members
@@ -141,7 +143,7 @@ embedding_dim = 768
 
 [index]
 max_chunk_lines = 150
-default_extensions = ["rs", "py", "js", "cjs", "mjs", "jsx", "ts", "tsx", "go", "java", "cs", "fs", "fsx", "scala", "sc", "hs", "rb"]
+default_extensions = ["rs", "py", "js", "cjs", "mjs", "jsx", "ts", "tsx", "go", "java", "cs", "fs", "fsx", "scala", "sc", "hs", "rb", "kt", "kts"]
 default_excludes = [
     "**/target/**",
     "**/node_modules/**",

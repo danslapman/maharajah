@@ -53,6 +53,7 @@ tree-sitter-typescript = "0.23"
 tree-sitter-go         = "0.25"
 tree-sitter-ruby       = "0.23"
 tree-sitter-fsharp     = "0.1"
+tree-sitter-kotlin     = { git = "https://github.com/fwcd/tree-sitter-kotlin" }
 
 # Error handling
 anyhow = "1.0"

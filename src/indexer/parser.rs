@@ -124,6 +124,16 @@ const FSHARP_KINDS: &[&str] = &[
     "exception_definition",
 ];
 
+const KOTLIN_KINDS: &[&str] = &[
+    "function_declaration",
+    "class_declaration",
+    "object_declaration",
+    "companion_object",
+    "secondary_constructor",
+    "property_declaration",
+    "type_alias",
+];
+
 // ─────────────────────────────────────────────────────────────────────────────
 
 pub fn parse_file(path: &Path, content: &str, max_chunk_lines: usize) -> Vec<Chunk> {
@@ -216,6 +226,13 @@ pub fn parse_file(path: &Path, content: &str, max_chunk_lines: usize) -> Vec<Chu
             tree_sitter_fsharp::LANGUAGE_FSHARP.into(),
             "fsharp",
             FSHARP_KINDS,
+            max_chunk_lines,
+        ),
+        "kt" | "kts" => parse_with_grammar(
+            content,
+            tree_sitter_kotlin::LANGUAGE.into(),
+            "kotlin",
+            KOTLIN_KINDS,
             max_chunk_lines,
         ),
         _ => vec![],
@@ -385,6 +402,13 @@ fn is_summary_kind(lang: &str, kind: &str) -> bool {
             "method" | "class" | "module" | "singleton_method" | "singleton_class"
         ),
         "fsharp" => matches!(kind, "value_declaration" | "type_defn"),
+        "kotlin" => matches!(
+            kind,
+            "function_declaration"
+                | "class_declaration"
+                | "object_declaration"
+                | "secondary_constructor"
+        ),
         _ => false,
     }
 }
@@ -404,6 +428,8 @@ fn comment_kinds_for(lang: &str) -> &'static [&'static str] {
         "haskell" => &["comment", "block_comment", "haddock"],
         "ruby" => &["comment"],
         "fsharp" => &["block_comment", "line_comment"],
+        // tree-sitter-kotlin uses "multiline_comment" for /** */ KDoc
+        "kotlin" => &["multiline_comment", "line_comment"],
         _ => &[],
     }
 }
@@ -429,6 +455,7 @@ fn is_doc_comment(raw: &str, lang: &str, kind: &str) -> bool {
         // Only Haddock-marked comments are documentation; plain `--` comments
         // (kind == "comment") are implementation notes and must not be used.
         "haskell" => kind == "haddock" || trimmed.starts_with("{-|"),
+        "kotlin" => trimmed.starts_with("/**"),
         // Go, Ruby, Python: the preceding comment block is the documentation
         _ => true,
     }
