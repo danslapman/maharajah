@@ -100,6 +100,8 @@ const TS_KINDS: &[&str] = &[
     "function_declaration",
     "class_declaration",
     "method_definition",
+    "arrow_function",
+    "generator_function_declaration",
     "interface_declaration",
     "type_alias_declaration",
     "enum_declaration",
@@ -370,6 +372,8 @@ fn is_summary_kind(lang: &str, kind: &str) -> bool {
             "function_declaration"
                 | "class_declaration"
                 | "method_definition"
+                | "arrow_function"
+                | "generator_function_declaration"
                 | "interface_declaration"
         ),
         "java" => matches!(

@@ -75,8 +75,12 @@ impl Default for AppConfig {
                 default_excludes: vec![
                     // Rust (cargo) — root and workspace members
                     "**/target/**".into(),
-                    // JavaScript / TypeScript
+                    // JavaScript / TypeScript — dependencies and build output
                     "**/node_modules/**".into(),
+                    "**/dist/**".into(),
+                    "**/out/**".into(),
+                    "**/.next/**".into(),
+                    "**/.nuxt/**".into(),
                     // Python
                     "**/__pycache__/**".into(),
                     ".venv/**".into(),
@@ -147,6 +151,10 @@ default_extensions = ["rs", "py", "js", "cjs", "mjs", "jsx", "ts", "tsx", "go", 
 default_excludes = [
     "**/target/**",
     "**/node_modules/**",
+    "**/dist/**",
+    "**/out/**",
+    "**/.next/**",
+    "**/.nuxt/**",
     "**/__pycache__/**",
     ".venv/**",
     "venv/**",
